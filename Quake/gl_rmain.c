@@ -875,7 +875,19 @@ void R_SetFrustum (void)
 	}
 
 	// View matrix
-	RotationMatrix(r_matview, DEG2RAD(-r_refdef.viewangles[ROLL]), 0);
+	IdentityMatrix(r_matview);
+
+	if (vr_enabled.value)
+	{
+		// Legacy GLQuake rotated the camera space so Z pointed up and X forward.
+		RotationMatrix(rotation, DEG2RAD(-90.0f), 0);
+		MatrixMultiply(r_matview, rotation);
+		RotationMatrix(rotation, DEG2RAD(90.0f), 2);
+		MatrixMultiply(r_matview, rotation);
+	}
+
+	RotationMatrix(rotation, DEG2RAD(-r_refdef.viewangles[ROLL]), 0);
+	MatrixMultiply(r_matview, rotation);
 	RotationMatrix(rotation, DEG2RAD(-r_refdef.viewangles[PITCH]), 1);
 	MatrixMultiply(r_matview, rotation);
 	RotationMatrix(rotation, DEG2RAD(-r_refdef.viewangles[YAW]), 2);

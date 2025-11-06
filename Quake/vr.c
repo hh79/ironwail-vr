@@ -1410,8 +1410,7 @@ void VR_GetProjectionMatrix(float *matrix)
     // Get the projection matrix from OpenVR for the current eye
     vr::HmdMatrix44_t projection = TransposeMatrix(
         ovrHMD->GetProjectionMatrix(current_eye->eye, 4.f, gl_farclip.value));
-    
-    // Copy matrix directly - both OpenVR and ironwail use OpenGL coordinate system
+
     memcpy(matrix, projection.m, 16 * sizeof(float));
 }
 
