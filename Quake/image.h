@@ -24,7 +24,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define GL_IMAGE_H
 
 //image.h -- image reading / writing
+// Forward declare for C, but C++ needs the actual definition from gl_texmgr.h
+#ifndef __cplusplus
 enum srcformat;
+#endif
 
 //be sure to free the hunk after using this loading function
 byte *Image_LoadImage (const char *name, int *width, int *height, enum srcformat *fmt);

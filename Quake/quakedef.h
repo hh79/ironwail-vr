@@ -282,10 +282,10 @@ typedef struct
 #include "gl_model.h"
 #include "world.h"
 
+#include "gl_texmgr.h"	//johnfitz -- must come before image.h for enum srcformat in C++
 #include "image.h"	//johnfitz
-#include "gl_texmgr.h"	//johnfitz
+#include "keys.h"	// must come before input.h for enum keydevice_t in C++
 #include "input.h"
-#include "keys.h"
 #include "menu.h"
 #include "cdaudio.h"
 #include "glquake.h"

@@ -181,6 +181,10 @@ typedef struct
 	vec3_t		mviewangles[2];	// during demo playback viewangles is lerped
 								// between these
 	vec3_t		viewangles;
+	
+	// VR aim angles
+	vec3_t		aimangles;
+	vec3_t      vmeshoffset;
 
 	vec3_t		mvelocity[2];	// update by server, used for lean+bob
 								// (0 is newest)
@@ -258,6 +262,10 @@ typedef struct
 	float		zoomdir;
 
 	qboolean	forceunderwater;	// force underwater warping/sound distortion even when camera is not submerged (e.g. alk1.2 liquidbrush)
+	
+	// VR hand tracking
+	vec3_t		handpos[2];
+	vec3_t		handrot[2];
 } client_state_t;
 
 

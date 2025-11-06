@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.7)
 include(${CMAKE_CURRENT_SOURCE_DIR}/Misc/cmake/ExtractVersion.cmake)
-project(ironwail VERSION ${IRONWAIL_VERSION})
+project(ironwail VERSION ${IRONWAIL_VERSION} LANGUAGES C CXX)
 
 cmake_policy(SET CMP0072 NEW)   #OpenGL_GL_PREFERENCE to GLVND
 
@@ -24,6 +24,7 @@ if (PKG_CONFIG_FOUND)
     pkg_check_modules(PC_MIKMOD IMPORTED_TARGET libmikmod)
     pkg_check_modules(PC_MODPLUG IMPORTED_TARGET libmodplug)
     pkg_check_modules(PC_XMP IMPORTED_TARGET libxmp)
+    pkg_check_modules(PC_OPENVR IMPORTED_TARGET openvr)
 endif()
 
 if (WIN32)
@@ -32,8 +33,16 @@ endif()
 
 file(GLOB IWAIL_SRC CONFIGURE_DEPENDS "Quake/*.c" "Quake/*.h")
 
+# Separate VR files for C++ compilation
+set(VR_SRC
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/vr.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/vr_menu.c
+)
+
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
+list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/vr.c)
+list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/vr_menu.c)
 
 if (UNIX)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/pl_win.c)
@@ -60,7 +69,12 @@ elseif (PC_MAD_FOUND)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/snd_mpg123.c)
 endif()
 
-add_executable(ironwail ${IWAIL_SRC})
+add_executable(ironwail ${IWAIL_SRC} ${VR_SRC})
+
+# Set C++ compilation for VR files
+set_source_files_properties(${VR_SRC} PROPERTIES LANGUAGE CXX)
+set_source_files_properties(${VR_SRC} PROPERTIES COMPILE_FLAGS "-std=c++14")
+
 if (UNIX)
 	target_link_libraries(ironwail PRIVATE m)
 	set(ENABLE_USERDIRS TRUE CACHE STRING "Enable user directories")
@@ -143,6 +157,32 @@ endif()
 if (PC_MIKMOD_FOUND OR PC_MODPLUG_FOUND OR PC_XMP_FOUND)
     target_compile_definitions(ironwail PRIVATE USE_CODEC_UMX)
 endif()
+
+# OpenVR support
+if (PC_OPENVR_FOUND)
+    target_link_libraries(ironwail PUBLIC PkgConfig::PC_OPENVR)
+else()
+    # Fallback to manual linking if pkg-config doesn't find openvr
+    find_library(OPENVR_LIBRARY NAMES openvr_api)
+    if (OPENVR_LIBRARY)
+        target_link_libraries(ironwail PUBLIC ${OPENVR_LIBRARY})
+        if (UNIX AND NOT APPLE)
+            target_link_libraries(ironwail PUBLIC ${CMAKE_DL_LIBS})
+        endif()
+    else()
+        message(WARNING "OpenVR library not found. VR support may not work.")
+    endif()
+endif()
+
+# Link standard C++ library for VR support
+target_link_libraries(ironwail PUBLIC stdc++)
+
+# Copy ironwail.pak to build directory
+add_custom_command(TARGET ironwail POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different
+		${CMAKE_CURRENT_SOURCE_DIR}/Quake/ironwail.pak
+		$<TARGET_FILE_DIR:ironwail>/id1/ironwail.pak
+	COMMENT "Copying ironwail.pak to build directory")
 
 if (WIN32)
 	#Copy DLL dependencies to output folder

@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_main.c
 
 #include "quakedef.h"
+#include "vr.h"
 
 qboolean	r_cache_thrash;		// compatability
 
@@ -341,6 +342,8 @@ void GL_PostProcess (void)
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
+
+	VR_HandleGammaCorrect();
 
 	variant = q_min ((int)softemu, 2);
 	GL_UseProgram (glprogs.postprocess[variant]);
@@ -832,15 +835,44 @@ void R_SetFrustum (void)
 	float logznear, logzfar;
 	float translation[16];
 	float rotation[16];
+	
+	// VR: Use VR projection matrix if enabled
+	extern cvar_t vr_enabled;
+	if (vr_enabled.value)
+	{
+		extern void VR_GetProjectionMatrix(float *matrix);
+		float vr_proj[16];
+		VR_GetProjectionMatrix(vr_proj);
+		
+		// Check if we got a valid VR matrix (non-zero)
+		if (vr_proj[0] != 0.0f)
+		{
+			memcpy(r_matproj, vr_proj, 16 * sizeof(float));
+		}
+		else
+		{
+			// Fallback to regular projection if VR not ready
+			znear = 4.f;
+			zfar = gl_farclip.value;
+			GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
+		}
+		
+		// Use VR near/far for logging
+		znear = 4.f;
+		zfar = gl_farclip.value;
+	}
+	else
+	{
+		// Regular (non-VR) projection calculation
+		// reduce near clip distance at high FOV's to avoid seeing through walls
+		w = 1.f / tanf (DEG2RAD (r_fovx) * 0.5f);
+		h = 1.f / tanf (DEG2RAD (r_fovy) * 0.5f);
+		d = 12.f * q_min (w, h);
+		znear = CLAMP (0.5f, d, 4.f);
+		zfar = gl_farclip.value;
 
-	// reduce near clip distance at high FOV's to avoid seeing through walls
-	w = 1.f / tanf (DEG2RAD (r_fovx) * 0.5f);
-	h = 1.f / tanf (DEG2RAD (r_fovy) * 0.5f);
-	d = 12.f * q_min (w, h);
-	znear = CLAMP (0.5f, d, 4.f);
-	zfar = gl_farclip.value;
-
-	GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
+		GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
+	}
 
 	// View matrix
 	RotationMatrix(r_matview, DEG2RAD(-r_refdef.viewangles[ROLL]), 0);
@@ -849,6 +881,7 @@ void R_SetFrustum (void)
 	RotationMatrix(rotation, DEG2RAD(-r_refdef.viewangles[YAW]), 2);
 	MatrixMultiply(r_matview, rotation);
 
+	// Translate by vieworg (which includes vr_viewOffset for VR)
 	TranslationMatrix(translation, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
 	MatrixMultiply(r_matview, translation);
 
@@ -895,6 +928,18 @@ R_SetupGL
 */
 void R_SetupGL (void)
 {
+	// VR: Skip framebuffer binding - VR code already bound the eye FBO
+	extern cvar_t vr_enabled;
+	if (vr_enabled.value)
+	{
+		// VR has already set up the framebuffer and viewport
+		// Just set the frame data for the renderer
+		framesetup.scene_fbo = 0; // VR manages its own FBOs
+		framesetup.oit_fbo = 0;
+		// Don't touch glViewport - VR already set it
+		return;
+	}
+	
 	if (!GL_NeedsSceneEffects ())
 	{
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, GL_NeedsPostprocess () ? framebufs.composite.fbo : 0u);
@@ -1160,9 +1205,12 @@ void R_DrawViewModel (void)
 	GL_BeginGroup ("View model");
 
 	// hack the depth range to prevent view model from poking into walls
-	GL_DepthRange (ZRANGE_VIEWMODEL);
+    // only when not in VR
+    if(!vr_enabled.value)
+		GL_DepthRange (ZRANGE_VIEWMODEL);
 	R_DrawAliasModels (&e, 1);
-	GL_DepthRange (ZRANGE_FULL);
+    if (!vr_enabled.value)
+		GL_DepthRange (ZRANGE_FULL);
 
 	GL_EndGroup ();
 }
@@ -1919,6 +1967,9 @@ void R_RenderScene (void)
 	R_ShowTris (); //johnfitz
 
 	R_ShowBoundingBoxes (); //johnfitz
+
+	if (vr_enabled.value && vr_crosshair.value)
+		VR_ShowCrosshair();
 
 	R_ShowPointFile ();
 }

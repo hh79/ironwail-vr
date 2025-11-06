@@ -60,6 +60,7 @@ static inline int IS_NAN (float x) {
 #define VectorAdd(a,b,dst)				do {(dst)[0]=(a)[0]+(b)[0];(dst)[1]=(a)[1]+(b)[1];(dst)[2]=(a)[2]+(b)[2];} while (0)
 #define VectorCopy(src,dst)				do {(dst)[0]=(src)[0];(dst)[1]=(src)[1];(dst)[2]=(src)[2];} while (0)
 #define VectorSet(v,x,y,z)				do {(v)[0]=(x);(v)[1]=(y);(v)[2]=(z);} while (0)
+#define VectorSwap(a,b)					do {float tmp; tmp = a[0]; a[0] = b[0]; b[0] = tmp; tmp = a[1]; a[1] = b[1]; b[1] = tmp; tmp = a[2]; a[2] = b[2]; b[2] = tmp;} while (0)
 #define VectorLengthSquared(v)			DotProduct(v,v)
 
 //johnfitz -- courtesy of lordhavoc
@@ -116,6 +117,11 @@ void DecodeMortonIndex (uint16_t index, int *x, int *y);
 
 void R_ConcatRotations (float in1[3][3], float in2[3][3], float out[3][3]);
 void R_ConcatTransforms (float in1[3][4], float in2[3][4], float out[3][4]);
+
+// VR math functions
+void RotMatFromAngleVector(vec3_t angles, vec3_t mat[3]);
+void AngleVectorFromRotMat(vec3_t mat[3], vec3_t angles);
+void CreateRotMat(int axis, float angle, vec3_t mat[3]);
 
 void FloorDivMod (double numer, double denom, int *quotient,
 		int *rem);

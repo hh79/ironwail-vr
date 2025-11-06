@@ -79,6 +79,9 @@ void IN_UpdateInputMode (void);
 
 qboolean IN_EmulatedCharEvents (void);
 
+#ifndef __cplusplus
+enum keydevice_t;
+#endif
 enum keydevice_t IN_GetLastActiveDeviceType (void);
 
 void IN_Move (usercmd_t *cmd);

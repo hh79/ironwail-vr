@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
+#include "vr.h"
 #include <setjmp.h>
 
 /*
@@ -779,7 +780,7 @@ Host_GetFrameInterval
 */
 double Host_GetFrameInterval (void)
 {
-	if ((host_maxfps.value || cls.state == ca_disconnected) && !cls.timedemo)
+	if ((host_maxfps.value || cls.state == ca_disconnected) && !cls.timedemo && !vr_enabled.value)
 	{
 		float maxfps;
 		if (cls.state == ca_disconnected)
@@ -1520,6 +1521,7 @@ void Host_Shutdown(void)
 		CDAudio_Shutdown ();
 		S_Shutdown ();
 		IN_Shutdown ();
+		VID_VR_Shutdown();
 		VID_Shutdown();
 	}
 

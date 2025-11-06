@@ -36,6 +36,7 @@ enum m_state_e {
 	m_net,
 	m_options,
 	m_video,
+	m_vr,
 	m_graphics,
 	m_interface,
 	m_game,

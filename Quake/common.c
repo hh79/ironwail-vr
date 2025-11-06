@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "q_ctype.h"
 #include "bgmusic.h"
 #include "steam.h"
+#include "vr.h"
 #include <time.h>
 #include <errno.h>
 #include "miniz.h"

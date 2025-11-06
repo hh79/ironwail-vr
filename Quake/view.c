@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // view.c -- player eye positioning
 
 #include "quakedef.h"
+#include "vr.h"
 
 /*
 
@@ -70,6 +71,10 @@ cvar_t	r_viewmodel_quake = {"r_viewmodel_quake", "0", CVAR_ARCHIVE};
 
 vec3_t	v_punchangles[2]; //johnfitz -- copied from cl.punchangle.  0 is current, 1 is previous value. never the same unless map just loaded
 
+extern cvar_t vr_enabled;
+extern cvar_t vr_aimmode;
+extern cvar_t vr_viewkick;
+
 /*
 ===============
 V_CalcRoll
@@ -89,7 +94,11 @@ float V_CalcRoll (vec3_t angles, vec3_t velocity)
 	sign = side < 0 ? -1 : 1;
 	side = fabs(side);
 
-	value = cl_rollangle.value;
+    // Don't roll view in VR
+    if (vr_enabled.value)
+        value = 0;
+    else
+		value = cl_rollangle.value;
 //	if (cl.inwater)
 //		value *= 6;
 
@@ -113,6 +122,10 @@ float V_CalcBob (void)
 	float	bob;
 	float	cycle;
 
+    // Don't bob if we're in VR
+    if (vr_enabled.value)
+        return 0.f;
+		
 	if (!cl_bobcycle.value) /* Avoid divide-by-zero, don't bob */
 		return 0.0f;
 
@@ -146,6 +159,11 @@ cvar_t	v_centerspeed = {"v_centerspeed","500", CVAR_NONE};
 
 void V_StartPitchDrift (void)
 {
+	if (vr_enabled.value)
+	{
+		VR_ResetOrientation();
+		return;
+	}
 	cl.lastcenterstart = cl.time;
 #if 1
 	if (cl.laststop == cl.time)
@@ -185,7 +203,7 @@ void V_DriftPitch (void)
 {
 	float		delta, move;
 
-	if (noclip_anglehack || !cl.onground || cls.demoplayback )
+	if (noclip_anglehack || !cl.onground || cls.demoplayback || vr_enabled.value)
 	//FIXME: noclip_anglehack is set on the server, so in a nonlocal game this won't work.
 	{
 		cl.driftmove = 0;
@@ -329,20 +347,24 @@ void V_ParseDamage (void)
 //
 // calculate view angle kicks
 //
-	ent = &cl_entities[cl.viewentity];
+    // check if we're out of vr or if vr viewkick is enabled
+    if(!vr_enabled.value || (vr_enabled.value && vr_viewkick.value) )
+    {
+		ent = &cl_entities[cl.viewentity];
 
-	VectorSubtract (from, ent->origin, from);
-	VectorNormalize (from);
+		VectorSubtract (from, ent->origin, from);
+		VectorNormalize (from);
 
-	AngleVectors (ent->angles, forward, right, up);
+		AngleVectors (ent->angles, forward, right, up);
 
-	side = DotProduct (from, right);
-	v_dmg_roll = count*side*v_kickroll.value;
+		side = DotProduct (from, right);
+		v_dmg_roll = count*side*v_kickroll.value;
 
-	side = DotProduct (from, forward);
-	v_dmg_pitch = count*side*v_kickpitch.value;
+		side = DotProduct (from, forward);
+		v_dmg_pitch = count*side*v_kickpitch.value;
 
-	v_dmg_time = v_kicktime.value;
+		v_dmg_time = v_kicktime.value;
+	}
 }
 
 
@@ -610,6 +632,15 @@ void CalcGunAngle (void)
 	static float oldyaw = 0;
 	static float oldpitch = 0;
 
+    // Skip everything if we're doing VR Controller aiming.
+    if (vr_enabled.value && vr_aimmode.value == VR_AIMMODE_CONTROLLER)
+    {
+        cl.viewent.angles[YAW] = cl.handrot[1][YAW];
+        cl.viewent.angles[PITCH] = -(cl.handrot[1][PITCH]) + vr_gunmodelpitch.value;
+        cl.viewent.angles[ROLL] = cl.handrot[1][ROLL];
+        return;
+    }
+
 	yaw = r_refdef.viewangles[YAW];
 	pitch = -r_refdef.viewangles[PITCH];
 
@@ -721,7 +752,7 @@ void V_CalcViewRoll (void)
 		v_dmg_time -= fabs (cl.time - cl.oldtime);
 	}
 
-	if (cl.stats[STAT_HEALTH] <= 0)
+	if (cl.stats[STAT_HEALTH] <= 0 && !vr_enabled.value)
 	{
 		r_refdef.viewangles[ROLL] = 80;	// dead view angle
 		return;
@@ -747,6 +778,14 @@ void V_CalcIntermissionRefdef (void)
 	VectorCopy (ent->origin, r_refdef.vieworg);
 	VectorCopy (ent->angles, r_refdef.viewangles);
 	view->model = NULL;
+
+	if (vr_enabled.value)
+	{
+		r_refdef.viewangles[PITCH] = 0;
+		VectorCopy(r_refdef.viewangles, r_refdef.aimangles);
+		VR_AddOrientationToViewAngles(r_refdef.viewangles);
+		VR_SetAngles(r_refdef.viewangles);
+	}
 
 // allways idle in intermission
 	old = v_idlescale.value;
@@ -785,8 +824,31 @@ void V_CalcRefdef (void)
 	bob = V_CalcBob ();
 
 // refresh position
-	VectorCopy (ent->origin, r_refdef.vieworg);
-	r_refdef.vieworg[2] += cl.viewheight + bob;
+	if (vr_enabled.value)
+	{
+		extern vec3_t vr_viewOffset;
+		_VectorAdd(ent->origin, vr_viewOffset, r_refdef.vieworg);
+		
+		// Debug: Print vieworg per eye
+		static int eye_count = 0;
+		static double last_vieworg_debug = 0;
+		double current_time = Sys_DoubleTime();
+		if (current_time - last_vieworg_debug >= 2.0) {
+			Sys_Printf("V_CalcRefdef eye %d: vieworg=(%.2f, %.2f, %.2f) offset=(%.2f, %.2f, %.2f)\n",
+				eye_count % 2, 
+				r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2],
+				vr_viewOffset[0], vr_viewOffset[1], vr_viewOffset[2]);
+			eye_count++;
+			if (eye_count % 2 == 0) last_vieworg_debug = current_time;
+		} else {
+			eye_count++;
+		}
+	}
+	else
+	{
+		VectorCopy (ent->origin, r_refdef.vieworg);
+		r_refdef.vieworg[2] += cl.viewheight + bob;
+	}
 
 // never let it sit exactly on a node line, because a water plane can
 // dissapear when viewed with the eye exactly on it.

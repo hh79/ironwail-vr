@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // draw.c -- 2d drawing
 
 #include "quakedef.h"
+#include "vr.h"
 
 const vec3_t	rgb_black = {0.f, 0.f, 0.f};
 const vec3_t	rgb_white = {1.f, 1.f, 1.f};
@@ -1109,6 +1110,9 @@ Draw_FadeScreen -- johnfitz -- revised
 */
 void Draw_FadeScreen (float alpha)
 {
+	if (vr_enabled.value)
+		return;
+		
 	Draw_PartialFadeScreen (glcanvas.left, glcanvas.right, glcanvas.top, glcanvas.bottom, alpha);
 }
 
@@ -1283,6 +1287,9 @@ GL_SetCanvas -- johnfitz -- support various canvas types
 void GL_SetCanvas (canvastype newcanvas)
 {
 	if (newcanvas == glcanvas.type)
+		return;
+
+	if (vr_enabled.value && !con_forcedup)
 		return;
 
 	glcanvas.type = newcanvas;

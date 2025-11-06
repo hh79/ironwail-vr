@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_phys.c
 
 #include "quakedef.h"
+#include "vr.h"
 
 /*
 
@@ -1003,6 +1004,27 @@ void SV_Physics_Client (edict_t	*ent, int num)
 		Sys_Error ("SV_Physics_client: bad movetype %i", (int)ent->v.movetype);
 	}
 
+	// VR: Apply room-scale movement to player physics
+	if (num == cl.viewentity && vr_enabled.value)
+	{
+		vec3_t restoreVel;
+		VectorCopy(ent->v.velocity, restoreVel);
+		extern vec3_t vr_room_scale_move;
+		VectorScale(vr_room_scale_move, 1.0f / host_frametime, ent->v.velocity);
+
+		switch ((int)ent->v.movetype)
+		{
+		case MOVETYPE_WALK:
+			if (!SV_CheckWater(ent) && !((int)ent->v.flags & FL_WATERJUMP))
+				SV_AddGravity(ent);
+			SV_CheckStuck(ent);
+			SV_WalkMove(ent);
+			break;
+		}
+
+		VectorCopy(restoreVel, ent->v.velocity);
+	}
+
 //
 // call standard player post-think
 //
@@ -1011,8 +1033,40 @@ void SV_Physics_Client (edict_t	*ent, int num)
 	wasunderwater = ent->v.waterlevel >= 3;
 
 	pr_global_struct->time = qcvm->time;
+
+	// VR: Replace player origin with hand origin for weapon positioning
+	vec3_t restoreOrigin;
+	if (vr_enabled.value)
+	{
+		extern int weaponCVarEntry;
+		vec3_t adj;
+		VectorCopy(cl.handpos[1], adj);
+
+		vec3_t ofs = {
+		   vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON].value,
+		   vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 1].value,
+		   vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 2].value + vr_gunmodely.value
+		};
+
+		vec3_t fwd2, right, up;
+		AngleVectors(cl.handrot[1], fwd2, right, up);
+		fwd2[0] *= vr_gunmodelscale.value * ofs[2];
+		fwd2[1] *= vr_gunmodelscale.value * ofs[2];
+		fwd2[2] *= vr_gunmodelscale.value * ofs[2];
+		VectorAdd(adj, fwd2, adj);
+
+		VectorCopy(ent->v.origin, restoreOrigin);
+		VectorCopy(adj, ent->v.origin);
+		ent->v.origin[2] -= vr_projectilespawn_z_offset.value; // quakec assumes 16 offset
+	}
+
 	pr_global_struct->self = EDICT_TO_PROG(ent);
 	PR_ExecuteProgram (pr_global_struct->PlayerPostThink);
+
+	if (vr_enabled.value)
+	{
+		VectorCopy(restoreOrigin, ent->v.origin);
+	}
 
 	forceunderwater = !wasunderwater && ent->v.waterlevel >= 3;
 	if (forceunderwater != ent->forcewater)

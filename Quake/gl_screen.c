@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "steam.h"
+#include "vr.h"
 #include <time.h>
 
 /*
@@ -2107,15 +2108,28 @@ void SCR_UpdateScreen (void)
 //
 	SCR_SetUpToDrawConsole ();
 
-	V_UpdateBlend (); //johnfitz -- V_UpdatePalette cleaned up and renamed
+	if (vr_enabled.value && !con_forcedup)
+	{
+		VR_UpdateScreenContent(); // phoboslab
+	}
+	else
+	{
+		V_UpdateBlend (); //johnfitz -- V_UpdatePalette cleaned up and renamed
 
-	V_RenderView ();
+		V_RenderView ();
+	}
 
-	GL_BeginGroup ("2D");
+	if (vr_enabled.value && !con_forcedup)
+	{
+		VR_Draw2D();
+	}
+	else
+	{
+		GL_BeginGroup ("2D");
 
-	GL_Set2D ();
+		GL_Set2D ();
 
-	//FIXME: only call this when needed
+		//FIXME: only call this when needed
 	SCR_TileClear ();
 
 	if (scr_drawdialog) //new game confirm
@@ -2166,6 +2180,7 @@ void SCR_UpdateScreen (void)
 	Draw_Flush ();
 
 	GL_EndGroup ();
+	}
 
 	GL_EndRendering ();
 }

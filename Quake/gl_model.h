@@ -341,6 +341,11 @@ typedef struct {
 	struct gltexture_s	*gltextures[MAX_SKINS][4]; //johnfitz
 	struct gltexture_s	*fbtextures[MAX_SKINS][4]; //johnfitz
 	int					texels[MAX_SKINS];	// only for player skins
+	
+	//For VR - we modify these, so keep the originals
+	vec3_t		original_scale;
+	vec3_t		original_scale_origin;
+	
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;
 

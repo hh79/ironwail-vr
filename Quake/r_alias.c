@@ -23,10 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
+#include "vr.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
+extern cvar_t vr_enabled, vr_world_scale;
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -516,7 +518,17 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	//
 	R_EntityMatrix (model_matrix, lerpdata.origin, lerpdata.angles, e->scale);
 	ApplyTranslation (model_matrix, paliashdr->scale_origin[0], paliashdr->scale_origin[1] * fovscale, paliashdr->scale_origin[2] * fovscale);
-	ApplyScale (model_matrix, paliashdr->scale[0], paliashdr->scale[1] * fovscale, paliashdr->scale[2] * fovscale);
+	
+	// Apply VR world scale to non-weapon entities (enemies, items, etc.)
+	if (vr_enabled.value && e != &cl.viewent)
+	{
+		float world_scale = vr_world_scale.value;
+		ApplyScale (model_matrix, paliashdr->scale[0] * world_scale, paliashdr->scale[1] * fovscale * world_scale, paliashdr->scale[2] * fovscale * world_scale);
+	}
+	else
+	{
+		ApplyScale (model_matrix, paliashdr->scale[0], paliashdr->scale[1] * fovscale, paliashdr->scale[2] * fovscale);
+	}
 
 	//
 	// set up for alpha blending

@@ -144,7 +144,13 @@ typedef enum keycode_t
 	K_GAMEPAD_END,
 	K_GAMEPAD_COUNT = K_GAMEPAD_END - K_GAMEPAD_BEGIN,
 
-	K_PAUSE = K_GAMEPAD_END,
+	// VR controller keys (for compatibility with quakespasm-openvr)
+	K_JOY1 = K_GAMEPAD_END,
+	K_JOY2,
+	K_JOY3,
+	K_JOY4,
+
+	K_PAUSE,
 
 	NUM_KEYCODES,
 } keycode_t;

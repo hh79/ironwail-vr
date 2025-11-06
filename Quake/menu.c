@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "q_ctype.h"
+#include "vr.h"
+#include "vr_menu.h"
 
 #include <time.h>
 
@@ -89,6 +91,10 @@ extern char crosshair_char;
 
 extern qboolean quake64;
 
+void(*vr_menucmdfn)(void);
+void(*vr_menudrawfn)(void);
+void(*vr_menukeyfn)(int key);
+
 enum m_state_e m_state;
 extern qboolean	keydown[256];
 float m_mousex, m_mousey;
@@ -115,6 +121,7 @@ void M_Menu_Main_f (void);
 		void M_Menu_Keys_f (void);
 		void M_Menu_Video_f (void);
 		void M_Menu_Gamepad_f (void);
+		void M_Menu_VR_f (void);
 	void M_Menu_Mods_f (void);
 		void M_Menu_ModInfo_f (const filelist_item_t *item);
 	void M_Menu_Help_f (void);
@@ -3139,6 +3146,7 @@ void M_Menu_Gamepad_f (void)
 		item (OPT_VIDEO,				"Display")						\
 		item (OPT_GRAPHICS,				"Graphics")						\
 		item (OPT_INTERFACE,			"Interface")					\
+		item (OPT_VR,					"VR Options")					\
 		item (SPACER,					"")								\
 		item (OPT_CUSTOMIZE,			"Key Setup")					\
 		item (OPT_GAMEPAD,				"Controller")					\
@@ -4852,6 +4860,9 @@ void M_Options_Key (int k)
 			break;
 		case OPT_VIDEO:
 			M_Menu_Video_f ();
+			break;
+		case OPT_VR:
+			M_Menu_VR_f();
 			break;
 		case OPT_GAMEPAD:
 			M_Menu_Gamepad_f ();
@@ -7066,6 +7077,42 @@ static void UI_Mouse_f (cvar_t *cvar)
 	}
 }
 
+//=============================================================================
+/* VR MENU */
+
+void M_Menu_VR_f(void)
+{
+	IN_DeactivateForMenu ();
+	key_dest = key_menu;
+	m_state = m_vr;
+	m_entersound = true;
+	
+	if (vr_menucmdfn)
+	{
+		(*vr_menucmdfn) ();
+	}
+}
+
+
+void M_VR_Draw(void)
+{
+	if (vr_menudrawfn)
+	{
+		(*vr_menudrawfn) ();
+	}
+}
+
+
+void M_VR_Key(int key)
+{
+	if (vr_menukeyfn)
+	{
+		(*vr_menukeyfn) (key);
+	}
+}
+
+//=============================================================================
+
 void M_Init (void)
 {
 	Cmd_AddCommand ("togglemenu", M_ToggleMenu_f);
@@ -7080,6 +7127,7 @@ void M_Init (void)
 	Cmd_AddCommand ("menu_keys", M_Menu_Keys_f);
 	Cmd_AddCommand ("menu_video", M_Menu_Video_f);
 	Cmd_AddCommand ("menu_gamepad", M_Menu_Gamepad_f);
+	Cmd_AddCommand ("menu_vr", M_Menu_VR_f);
 	Cmd_AddCommand ("help", M_Menu_Help_f);
 	Cmd_AddCommand ("menu_quit", M_Menu_Quit_f);
 	Cmd_AddCommand ("menu_credits", M_Menu_Credits_f); // needed by the 2021 re-release
@@ -7192,6 +7240,10 @@ void M_Draw (void)
 
 	case m_keys:
 		M_Keys_Draw ();
+		break;
+
+	case m_vr:
+		M_VR_Draw ();
 		break;
 
 	case m_mods:
@@ -7314,6 +7366,10 @@ void M_Keydown (int key)
 
 	case m_keys:
 		M_Keys_Key (key);
+		return;
+
+	case m_vr:
+		M_VR_Key (key);
 		return;
 
 	case m_mods:

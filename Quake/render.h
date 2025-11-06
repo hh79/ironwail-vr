@@ -99,6 +99,7 @@ typedef struct
 									// FIXME: not need vrect next field here?
 	vec3_t		vieworg;
 	vec3_t		viewangles;
+	vec3_t		aimangles;			// VR aim angles
 
 	float		basefov;
 	float		fov_x, fov_y;

@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "q_ctype.h"
 #include "json.h"
+#include "vr.h"
 #include <time.h>
 #ifndef WITHOUT_CURL
 #include <curl/curl.h>
@@ -3670,6 +3671,14 @@ static void Host_Startdemos_f (void)
 	if (!sv.active && cls.demonum != -1 && !cls.demoplayback)
 	{
 		cls.demonum = 0;
+		if (vr_enabled.value) {
+			// Start a new game when vr_enabled
+			Cbuf_AddText("maxplayers 1\n");
+			Cbuf_AddText("deathmatch 0\n");
+			Cbuf_AddText("coop 0\n");
+			Cbuf_AddText("map start\n");
+			Cbuf_AddText("centerview\n");
+		}
 		Cbuf_InsertText ("menu_main\n");
 		if (!fitzmode && !cl_startdemos.value)
 		{  /* QuakeSpasm customization: */
