@@ -51,6 +51,8 @@ typedef struct {
     vr::HmdVector3_t position;
     vr::HmdQuaternion_t orientation;
     float fov_x, fov_y;
+    float tan_left, tan_right;
+    float tan_up, tan_down;
 } vr_eye_t;
 
 typedef struct {
@@ -907,10 +909,14 @@ qboolean VR_Enable()
         ovrHMD->GetProjectionRaw(
             eyes[i].eye, &LeftTan, &RightTan, &UpTan, &DownTan);
 
-        eyes[i].index = i;
-        eyes[i].fbo = CreateFBO(vrwidth, vrheight);
-        eyes[i].fov_x = (atan(-LeftTan) + atan(RightTan)) / M_PI_DIV_180;
-        eyes[i].fov_y = (atan(-UpTan) + atan(DownTan)) / M_PI_DIV_180;
+    eyes[i].index = i;
+    eyes[i].fbo = CreateFBO(vrwidth, vrheight);
+    eyes[i].fov_x = (atan(-LeftTan) + atan(RightTan)) / M_PI_DIV_180;
+    eyes[i].fov_y = (atan(-UpTan) + atan(DownTan)) / M_PI_DIV_180;
+    eyes[i].tan_left = LeftTan;
+    eyes[i].tan_right = RightTan;
+    eyes[i].tan_up = UpTan;
+    eyes[i].tan_down = DownTan;
         Sys_Printf("Eye %d: FOV X=%.2f Y=%.2f, RenderTarget=%dx%d\n", 
             i, eyes[i].fov_x, eyes[i].fov_y, vrwidth, vrheight);
     }
@@ -1378,6 +1384,49 @@ void VR_UpdateScreenContent()
 }
 } // extern "C"
 
+static void VR_BuildIronwailProjection(const vr_eye_t *eye, float *matrix)
+{
+    extern int gl_clipcontrol_able;
+
+    // START WITH OPENVR'S PROJECTION MATRIX AS BASE
+    // This preserves the correct eye positions and other OpenVR-specific settings
+    vr::HmdMatrix44_t openvr_proj = TransposeMatrix(
+        ovrHMD->GetProjectionMatrix(eye->eye, 4.f, gl_farclip.value));
+    memcpy(matrix, openvr_proj.m, 16 * sizeof(float));
+
+    // NOW OVERRIDE ONLY THE FRUSTUM CULLING ELEMENTS
+    // These need to match Ironwail's coordinate system for proper culling
+    const float tan_left = eye->tan_left;
+    const float tan_right = eye->tan_right;
+    const float tan_up = eye->tan_up;
+    const float tan_down = eye->tan_down;
+
+    const float tan_lr_diff = tan_right - tan_left;
+    const float tan_ud_diff = tan_up - tan_down;
+    const float znear = 4.f;
+    const float zfar = gl_farclip.value;
+    const float denom = zfar - znear;
+
+    if (fabsf(denom) < 1e-6f)
+        return;
+
+    if (gl_clipcontrol_able)
+    {
+        // Reversed-Z path
+        matrix[0 * 4 + 2] = -znear / denom;
+        matrix[3 * 4 + 2] = (zfar * znear) / denom;
+    }
+    else
+    {
+        matrix[0 * 4 + 2] = (zfar + znear) / denom;
+        matrix[3 * 4 + 2] = -2.0f * zfar * znear / denom;
+    }
+
+    // Override perspective divide settings
+    matrix[0 * 4 + 3] = 1.0f;
+    matrix[3 * 4 + 3] = 0.0f;
+}
+
 void VR_SetMatrices()
 {
     vr::HmdMatrix44_t projection;
@@ -1407,11 +1456,10 @@ void VR_GetProjectionMatrix(float *matrix)
         return;
     }
     
-    // Get the projection matrix from OpenVR for the current eye
-    vr::HmdMatrix44_t projection = TransposeMatrix(
-        ovrHMD->GetProjectionMatrix(current_eye->eye, 4.f, gl_farclip.value));
+    float ironwail_proj[16];
+    VR_BuildIronwailProjection(current_eye, ironwail_proj);
 
-    memcpy(matrix, projection.m, 16 * sizeof(float));
+    memcpy(matrix, ironwail_proj, 16 * sizeof(float));
 }
 
 // Get VR eye offset to apply to view matrix
