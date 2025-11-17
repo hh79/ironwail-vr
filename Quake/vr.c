@@ -252,6 +252,7 @@ DEFINE_CVAR(vr_joystick_axis_exponent, 1.0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_joystick_deadzone_trunc, 1, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_hud_scale, 0.025, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_menu_scale, 0.13, CVAR_ARCHIVE);
+DEFINE_CVAR(vr_debug_pose, 1, CVAR_NONE);
 
 static qboolean InitOpenGLExtensions()
 {
@@ -448,6 +449,44 @@ vr::HmdVector3_t Matrix34ToVector(vr::HmdMatrix34_t in)
     vector.v[2] = in.m[2][3];
 
     return vector;
+}
+
+static vr::HmdQuaternion_t QuaternionMultiply(const vr::HmdQuaternion_t& a, const vr::HmdQuaternion_t& b)
+{
+    vr::HmdQuaternion_t out;
+    out.w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
+    out.x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
+    out.y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x;
+    out.z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w;
+    return out;
+}
+
+static vr::HmdQuaternion_t QuaternionConjugate(const vr::HmdQuaternion_t& q)
+{
+    vr::HmdQuaternion_t out;
+    out.w = q.w;
+    out.x = -q.x;
+    out.y = -q.y;
+    out.z = -q.z;
+    return out;
+}
+
+static vr::HmdQuaternion_t ConvertOpenVRToQuakeQuaternion(const vr::HmdQuaternion_t& q)
+{
+    static const vr::HmdQuaternion_t basis = { 0.5f, 0.5f, -0.5f, -0.5f };
+    static const vr::HmdQuaternion_t basis_conjugate = { 0.5f, -0.5f, 0.5f, 0.5f };
+
+    vr::HmdQuaternion_t tmp = QuaternionMultiply(basis, q);
+    return QuaternionMultiply(tmp, basis_conjugate);
+}
+
+static vr::HmdVector3_t ConvertOpenVRToQuakeVector(const vr::HmdVector3_t& v)
+{
+    vr::HmdVector3_t out;
+    out.v[0] = -v.v[2];
+    out.v[1] = -v.v[0];
+    out.v[2] = v.v[1];
+    return out;
 }
 
 // Transforms a HMD Matrix34 to a Quaternion
@@ -1126,25 +1165,57 @@ void VR_UpdateScreenContent()
             headPos.v[0] -= lastHeadOrigin[1];
             headPos.v[2] -= lastHeadOrigin[0];
 
-            vr::HmdQuaternion_t headQuat =
+            vr::HmdQuaternion_t headQuatOpenVR =
                 Matrix34ToQuaternion(ovr_DevicePose->mDeviceToAbsoluteTracking);
+            vr::HmdQuaternion_t headQuat = ConvertOpenVRToQuakeQuaternion(headQuatOpenVR);
             vr::HmdVector3_t leyePos =
                 Matrix34ToVector(ovrHMD->GetEyeToHeadTransform(eyes[0].eye));
             vr::HmdVector3_t reyePos =
                 Matrix34ToVector(ovrHMD->GetEyeToHeadTransform(eyes[1].eye));
 
-            leyePos = RotateVectorByQuaternion(leyePos, headQuat);
-            reyePos = RotateVectorByQuaternion(reyePos, headQuat);
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                leyePos.v[axis] = -leyePos.v[axis];
+                reyePos.v[axis] = -reyePos.v[axis];
+            }
+
+            leyePos = RotateVectorByQuaternion(leyePos, headQuatOpenVR);
+            reyePos = RotateVectorByQuaternion(reyePos, headQuatOpenVR);
 
             HmdVec3RotateY(&headPos, -vrYaw * M_PI_DIV_180);
 
             HmdVec3RotateY(&leyePos, -vrYaw * M_PI_DIV_180);
             HmdVec3RotateY(&reyePos, -vrYaw * M_PI_DIV_180);
 
-            eyes[0].position = AddVectors(headPos, leyePos);
-            eyes[1].position = AddVectors(headPos, reyePos);
+            vr::HmdVector3_t leftEyeWorld = AddVectors(headPos, leyePos);
+            vr::HmdVector3_t rightEyeWorld = AddVectors(headPos, reyePos);
+            eyes[0].position = ConvertOpenVRToQuakeVector(leftEyeWorld);
+            eyes[1].position = ConvertOpenVRToQuakeVector(rightEyeWorld);
             eyes[0].orientation = headQuat;
             eyes[1].orientation = headQuat;
+
+            if (vr_debug_pose.value)
+            {
+                static double last_pose_debug = 0;
+                double pose_now = Sys_DoubleTime();
+                if (pose_now - last_pose_debug >= 0.25)
+                {
+                    vec3_t headAngles;
+                    QuatToYawPitchRoll(headQuat, headAngles);
+                    vr::HmdVector3_t headPosQuake = ConvertOpenVRToQuakeVector(headPos);
+                    Sys_Printf("[VR DEBUG] Head OVR=(%.3f, %.3f, %.3f) Quake=(%.3f, %.3f, %.3f) origin=(%.3f, %.3f, %.3f) yaw/pitch/roll=(%.2f, %.2f, %.2f) vrYaw=%.2f\n",
+                        headPos.v[0], headPos.v[1], headPos.v[2],
+                        headPosQuake.v[0], headPosQuake.v[1], headPosQuake.v[2],
+                        headOrigin[0], headOrigin[1], headOrigin[2],
+                        headAngles[YAW], headAngles[PITCH], headAngles[ROLL], vrYaw);
+                    Sys_Printf("[VR DEBUG] EyeL worldOVR=(%.3f, %.3f, %.3f) → quake=(%.3f, %.3f, %.3f) EyeR worldOVR=(%.3f, %.3f, %.3f) → quake=(%.3f, %.3f, %.3f)\n",
+                        leftEyeWorld.v[0], leftEyeWorld.v[1], leftEyeWorld.v[2],
+                        eyes[0].position.v[0], eyes[0].position.v[1], eyes[0].position.v[2],
+                        rightEyeWorld.v[0], rightEyeWorld.v[1], rightEyeWorld.v[2],
+                        eyes[1].position.v[0], eyes[1].position.v[1], eyes[1].position.v[2]);
+                    last_pose_debug = pose_now;
+                }
+            }
         }
         // Controller vectors update
         else if(ovr_DevicePose[iDevice].bPoseIsValid &&
@@ -1155,6 +1226,7 @@ void VR_UpdateScreenContent()
                 ovr_DevicePose[iDevice].mDeviceToAbsoluteTracking);
             vr::HmdQuaternion_t rawControllerQuat = Matrix34ToQuaternion(
                 ovr_DevicePose[iDevice].mDeviceToAbsoluteTracking);
+            vr::HmdQuaternion_t controllerQuat = ConvertOpenVRToQuakeQuaternion(rawControllerQuat);
             vr::HmdVector3_t rawControllerVel =
                 ovr_DevicePose[iDevice].vVelocity;
 
@@ -1192,7 +1264,7 @@ void VR_UpdateScreenContent()
                     meters_to_units;
                 controller->position[2] =
                     (rawControllerPos.v[1]) * meters_to_units;
-                QuatToYawPitchRoll(rawControllerQuat, controller->orientation);
+                QuatToYawPitchRoll(controllerQuat, controller->orientation);
             }
         }
     }
@@ -1202,14 +1274,16 @@ void VR_UpdateScreenContent()
 
     QuatToYawPitchRoll(eyes[1].orientation, orientation);
     
-    // Debug: Show raw quaternion values
-    static double last_quat_debug = 0;
-    double quat_time = Sys_DoubleTime();
-    if (quat_time - last_quat_debug >= 2.0) {
-        vr::HmdQuaternion_t q = eyes[1].orientation;
-        Sys_Printf("HMD Quat: w=%.3f x=%.3f y=%.3f z=%.3f → pitch=%.2f yaw=%.2f roll=%.2f\n",
-            q.w, q.x, q.y, q.z, orientation[PITCH], orientation[YAW], orientation[ROLL]);
-        last_quat_debug = quat_time;
+    if (vr_debug_pose.value)
+    {
+        static double last_quat_debug = 0;
+        double quat_time = Sys_DoubleTime();
+        if (quat_time - last_quat_debug >= 1.0) {
+            vr::HmdQuaternion_t q = eyes[1].orientation;
+            Sys_Printf("[VR DEBUG] HMD Quat wxyz=(%.3f, %.3f, %.3f, %.3f) → pitch/yaw/roll=(%.2f, %.2f, %.2f)\n",
+                q.w, q.x, q.y, q.z, orientation[PITCH], orientation[YAW], orientation[ROLL]);
+            last_quat_debug = quat_time;
+        }
     }
     
     if (readbackYaw)
@@ -1318,13 +1392,20 @@ void VR_UpdateScreenContent()
     
     static double last_angle_debug = 0;
     double current_time = Sys_DoubleTime();
-    if (current_time - last_angle_debug >= 1.0) {
-        Sys_Printf("cl.viewangles: pitch=%.2f yaw=%.2f roll=%.2f\n",
-            cl.viewangles[PITCH], cl.viewangles[YAW], cl.viewangles[ROLL]);
-        Sys_Printf("r_refdef.viewangles: pitch=%.2f yaw=%.2f roll=%.2f\n",
+    if (vr_debug_pose.value && current_time - last_angle_debug >= 1.0) {
+        Sys_Printf("[VR DEBUG] cl.viewangles=(%.2f, %.2f, %.2f) vrYaw=%.2f\n",
+            cl.viewangles[PITCH], cl.viewangles[YAW], cl.viewangles[ROLL], vrYaw);
+        Sys_Printf("[VR DEBUG] r_refdef.viewangles=(%.2f, %.2f, %.2f)\n",
             r_refdef.viewangles[PITCH], r_refdef.viewangles[YAW], r_refdef.viewangles[ROLL]);
+        Sys_Printf("[VR DEBUG] r_refdef.vieworg=(%.2f, %.2f, %.2f) vr_viewOffset=(%.2f, %.2f, %.2f)\n",
+            r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2],
+            vr_viewOffset[0], vr_viewOffset[1], vr_viewOffset[2]);
         last_angle_debug = current_time;
     }
+
+    static double last_eye_debug = 0;
+    double eye_debug_now = Sys_DoubleTime();
+    qboolean dump_eye_debug = vr_debug_pose.value && (eye_debug_now - last_eye_debug >= 0.25);
 
     // Render the scene for each eye into their FBOs
     for(int i = 0; i < 2; i++)
@@ -1335,42 +1416,29 @@ void VR_UpdateScreenContent()
 
         // We need to scale the view offset position to quake units and rotate it by the current input angles (viewangle - eye orientation)
         QuatToYawPitchRoll(current_eye->orientation, orientation);
-        
-        static int frame_count = 0;
-        static double last_debug_time = 0;
-        double current_time = Sys_DoubleTime();
-        
-        if (i == 0 && current_time - last_debug_time >= 1.0) {  // Print every second
-            Sys_Printf("Eye 0 RAW: v[0]=%.3f v[1]=%.3f v[2]=%.3f\n",
-                current_eye->position.v[0], current_eye->position.v[1], current_eye->position.v[2]);
-            frame_count = 0;
-        }
-        if (i == 1 && frame_count == 0) {  // Print eye 1 at same time as eye 0
-            Sys_Printf("Eye 1 RAW: v[0]=%.3f v[1]=%.3f v[2]=%.3f\n",
-                current_eye->position.v[0], current_eye->position.v[1], current_eye->position.v[2]);
-        }
-        
-        // OpenVR to Quake coordinate conversion:
-        // OpenVR: X=left/right, Y=up/down, Z=forward/back
-        // Quake: X=forward/back, Y=left/right, Z=up/down
-        temp[0] = -current_eye->position.v[2] * meters_to_units; // Quake X from OpenVR Z (forward/back)
-        temp[1] = -current_eye->position.v[0] * meters_to_units; // Quake Y from OpenVR X (left/right) 
-        temp[2] = current_eye->position.v[1] * meters_to_units;  // Quake Z from OpenVR Y (up/down)
-        
-        if (i == 0 && frame_count == 0) {  // Print converted for eye 0
-            Sys_Printf("Eye 0 CONV: %.2f, %.2f, %.2f | orient: %.2f, %.2f, %.2f\n",
-                temp[0], temp[1], temp[2], orientation[0], orientation[1], orientation[2]);
-        }
-        if (i == 1 && frame_count == 0) {  // Print eye 1 converted
-            Sys_Printf("Eye 1 CONV: %.2f, %.2f, %.2f | orient: %.2f, %.2f, %.2f\n",
-                temp[0], temp[1], temp[2], orientation[0], orientation[1], orientation[2]);
-            last_debug_time = current_time;  // Update timer after both eyes printed
-        }
-        
-        Vec3RotateZ(temp,
-            (r_refdef.viewangles[YAW] - orientation[YAW]) * M_PI_DIV_180,
-            vr_viewOffset);
+
+        // Eye positions are stored in Quake coordinates already; just scale to Quake units
+        temp[0] = current_eye->position.v[0] * meters_to_units;
+        temp[1] = current_eye->position.v[1] * meters_to_units;
+        temp[2] = current_eye->position.v[2] * meters_to_units;
+
+        float yaw_delta = (r_refdef.viewangles[YAW] - orientation[YAW]);
+        Vec3RotateZ(temp, yaw_delta * M_PI_DIV_180, vr_viewOffset);
         vr_viewOffset[2] += vr_floor_offset.value;
+
+        if (dump_eye_debug)
+        {
+            Sys_Printf("[VR DEBUG] Eye %d quakePos=(%.2f, %.2f, %.2f) pitch/yaw/roll=(%.2f, %.2f, %.2f) viewYawDelta=%.2f viewOffset=(%.2f, %.2f, %.2f)\n",
+                i,
+                temp[0], temp[1], temp[2],
+                orientation[PITCH], orientation[YAW], orientation[ROLL],
+                yaw_delta,
+                vr_viewOffset[0], vr_viewOffset[1], vr_viewOffset[2]);
+            if (i == 1)
+            {
+                last_eye_debug = eye_debug_now;
+            }
+        }
 
         RenderScreenForCurrentEye_OVR();
     }
@@ -1384,48 +1452,7 @@ void VR_UpdateScreenContent()
 }
 } // extern "C"
 
-static void VR_BuildIronwailProjection(const vr_eye_t *eye, float *matrix)
-{
-    extern int gl_clipcontrol_able;
 
-    // START WITH OPENVR'S PROJECTION MATRIX AS BASE
-    // This preserves the correct eye positions and other OpenVR-specific settings
-    vr::HmdMatrix44_t openvr_proj = TransposeMatrix(
-        ovrHMD->GetProjectionMatrix(eye->eye, 4.f, gl_farclip.value));
-    memcpy(matrix, openvr_proj.m, 16 * sizeof(float));
-
-    // NOW OVERRIDE ONLY THE FRUSTUM CULLING ELEMENTS
-    // These need to match Ironwail's coordinate system for proper culling
-    const float tan_left = eye->tan_left;
-    const float tan_right = eye->tan_right;
-    const float tan_up = eye->tan_up;
-    const float tan_down = eye->tan_down;
-
-    const float tan_lr_diff = tan_right - tan_left;
-    const float tan_ud_diff = tan_up - tan_down;
-    const float znear = 4.f;
-    const float zfar = gl_farclip.value;
-    const float denom = zfar - znear;
-
-    if (fabsf(denom) < 1e-6f)
-        return;
-
-    if (gl_clipcontrol_able)
-    {
-        // Reversed-Z path
-        matrix[0 * 4 + 2] = -znear / denom;
-        matrix[3 * 4 + 2] = (zfar * znear) / denom;
-    }
-    else
-    {
-        matrix[0 * 4 + 2] = (zfar + znear) / denom;
-        matrix[3 * 4 + 2] = -2.0f * zfar * znear / denom;
-    }
-
-    // Override perspective divide settings
-    matrix[0 * 4 + 3] = 1.0f;
-    matrix[3 * 4 + 3] = 0.0f;
-}
 
 void VR_SetMatrices()
 {
@@ -1446,22 +1473,6 @@ void VR_SetMatrices()
 }
 
 extern "C" {
-// Get VR projection matrix for current eye - used by ironwail's modern renderer
-void VR_GetProjectionMatrix(float *matrix)
-{
-    if (!vr_initialized || !current_eye)
-    {
-        // VR not active, return identity or signal to use default
-        memset(matrix, 0, 16 * sizeof(float));
-        return;
-    }
-    
-    float ironwail_proj[16];
-    VR_BuildIronwailProjection(current_eye, ironwail_proj);
-
-    memcpy(matrix, ironwail_proj, 16 * sizeof(float));
-}
-
 // Get VR eye offset to apply to view matrix
 void VR_GetViewMatrix(float *matrix)
 {
@@ -1473,19 +1484,52 @@ void VR_GetViewMatrix(float *matrix)
         return;
     }
     
-    // Get eye position offset in Quake coordinates (already converted in rendering loop)
+    // Get eye position offset in Quake coordinates (already converted when pose was read)
     vec3_t temp;
-    temp[0] = -current_eye->position.v[2] * meters_to_units; // Quake X from OpenVR Z
-    temp[1] = -current_eye->position.v[0] * meters_to_units; // Quake Y from OpenVR X
-    temp[2] = current_eye->position.v[1] * meters_to_units;  // Quake Z from OpenVR Y
+    temp[0] = current_eye->position.v[0] * meters_to_units;
+    temp[1] = current_eye->position.v[1] * meters_to_units;
+    temp[2] = current_eye->position.v[2] * meters_to_units;
     
     // Create translation matrix for eye offset
     matrix[0] = 1.0f; matrix[4] = 0.0f; matrix[8] = 0.0f;  matrix[12] = temp[0];
     matrix[1] = 0.0f; matrix[5] = 1.0f; matrix[9] = 0.0f;  matrix[13] = temp[1];
     matrix[2] = 0.0f; matrix[6] = 0.0f; matrix[10] = 1.0f; matrix[14] = temp[2];
     matrix[3] = 0.0f; matrix[7] = 0.0f; matrix[11] = 0.0f; matrix[15] = 1.0f;
+
+    if (vr_debug_pose.value)
+    {
+        static double last_viewmatrix_debug = 0;
+        double debug_now = Sys_DoubleTime();
+        if (debug_now - last_viewmatrix_debug >= 0.5)
+        {
+            int eye_index = current_eye ? current_eye->index : -1;
+            Sys_Printf("[VR DEBUG] ViewMatrix eye=%d translation=(%.2f, %.2f, %.2f)\n",
+                eye_index, temp[0], temp[1], temp[2]);
+            last_viewmatrix_debug = debug_now;
+        }
+    }
 }
 } // extern "C"
+
+static qboolean VR_BuildProjectionForEye(const vr_eye_t* eye, float* matrix)
+{
+    if (!ovrHMD || !eye)
+        return false;
+
+    vr::HmdMatrix44_t projection = TransposeMatrix(
+        ovrHMD->GetProjectionMatrix(eye->eye, 4.f, gl_farclip.value));
+
+    memcpy(matrix, projection.m, 16 * sizeof(float));
+    return true;
+}
+
+extern "C" qboolean VR_GetProjectionMatrix(float* matrix)
+{
+    if (!vr_initialized || !current_eye)
+        return false;
+
+    return VR_BuildProjectionForEye(current_eye, matrix);
+}
 
 
 void VR_AddOrientationToViewAngles(vec3_t angles)

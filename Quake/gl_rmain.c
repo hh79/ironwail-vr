@@ -24,6 +24,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "vr.h"
 
+extern qboolean VR_GetProjectionMatrix(float *matrix);
+
 qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
@@ -836,55 +838,35 @@ void R_SetFrustum (void)
 	float translation[16];
 	float rotation[16];
 	
-	// VR: Use VR projection matrix if enabled
 	extern cvar_t vr_enabled;
+
+	// reduce near clip distance at high FOV's to avoid seeing through walls
+	w = 1.f / tanf (DEG2RAD (r_fovx) * 0.5f);
+	h = 1.f / tanf (DEG2RAD (r_fovy) * 0.5f);
+	d = 12.f * q_min (w, h);
+	znear = CLAMP (0.5f, d, 4.f);
+	zfar = gl_farclip.value;
+
 	if (vr_enabled.value)
 	{
-		extern void VR_GetProjectionMatrix(float *matrix);
-		float vr_proj[16];
-		VR_GetProjectionMatrix(vr_proj);
-		
-		// Check if we got a valid VR matrix (non-zero)
-		if (vr_proj[0] != 0.0f)
+		if (!VR_GetProjectionMatrix(r_matproj))
 		{
-			memcpy(r_matproj, vr_proj, 16 * sizeof(float));
-		}
-		else
-		{
-			// Fallback to regular projection if VR not ready
-			znear = 4.f;
-			zfar = gl_farclip.value;
 			GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
 		}
-		
-		// Use VR near/far for logging
-		znear = 4.f;
-		zfar = gl_farclip.value;
 	}
 	else
 	{
-		// Regular (non-VR) projection calculation
-		// reduce near clip distance at high FOV's to avoid seeing through walls
-		w = 1.f / tanf (DEG2RAD (r_fovx) * 0.5f);
-		h = 1.f / tanf (DEG2RAD (r_fovy) * 0.5f);
-		d = 12.f * q_min (w, h);
-		znear = CLAMP (0.5f, d, 4.f);
-		zfar = gl_farclip.value;
-
 		GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
 	}
 
 	// View matrix
 	IdentityMatrix(r_matview);
 
-	if (vr_enabled.value)
-	{
-		// Legacy GLQuake rotated the camera space so Z pointed up and X forward.
-		RotationMatrix(rotation, DEG2RAD(-90.0f), 0);
-		MatrixMultiply(r_matview, rotation);
-		RotationMatrix(rotation, DEG2RAD(90.0f), 2);
-		MatrixMultiply(r_matview, rotation);
-	}
+	// Legacy GLQuake rotated the camera space so Z pointed up and X forward.
+	RotationMatrix(rotation, DEG2RAD(-90.0f), 0);
+	MatrixMultiply(r_matview, rotation);
+	RotationMatrix(rotation, DEG2RAD(90.0f), 2);
+	MatrixMultiply(r_matview, rotation);
 
 	RotationMatrix(rotation, DEG2RAD(-r_refdef.viewangles[ROLL]), 0);
 	MatrixMultiply(r_matview, rotation);

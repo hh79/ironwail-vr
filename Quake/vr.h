@@ -43,7 +43,7 @@ void VR_ShowCrosshair();
 void VR_Draw2D();
 void VR_Move(usercmd_t *cmd);
 void VR_InitGame();
-void VR_GetProjectionMatrix(float *matrix); // Get VR projection matrix for current eye
+qboolean VR_GetProjectionMatrix(float *matrix); // Get VR projection matrix for current eye
 void VR_GetViewMatrix(float *matrix); // Get VR view offset for current eye
 void VR_PushYaw();
 void VR_DrawSbar();
