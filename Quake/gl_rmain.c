@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "vr.h"
 
 extern qboolean VR_GetProjectionMatrix(float *matrix);
+extern void VR_GetViewMatrix(float *matrix);
 
 qboolean	r_cache_thrash;		// compatability
 
@@ -847,17 +848,11 @@ void R_SetFrustum (void)
 	znear = CLAMP (0.5f, d, 4.f);
 	zfar = gl_farclip.value;
 
-	if (vr_enabled.value)
-	{
-		if (!VR_GetProjectionMatrix(r_matproj))
-		{
-			GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
-		}
-	}
-	else
-	{
-		GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
-	}
+	// VR: Always use ironwail's projection format for frustum extraction/culling.
+	// The VR projection matrix (from OpenVR) uses standard OpenGL format which is
+	// incompatible with ironwail's ExtractFrustumPlane. VR_SetMatrices() applies
+	// the actual VR projection for rendering later.
+	GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
 
 	// View matrix
 	IdentityMatrix(r_matview);
@@ -878,6 +873,14 @@ void R_SetFrustum (void)
 	// Translate by vieworg (which includes vr_viewOffset for VR)
 	TranslationMatrix(translation, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
 	MatrixMultiply(r_matview, translation);
+
+	// Apply VR eye offset for stereo rendering
+	if (vr_enabled.value)
+	{
+		float vr_eye_matrix[16];
+		VR_GetViewMatrix(vr_eye_matrix);
+		MatrixMultiply(r_matview, vr_eye_matrix);
+	}
 
 	// View projection matrix
 	memcpy(r_matviewproj, r_matproj, 16 * sizeof(float));

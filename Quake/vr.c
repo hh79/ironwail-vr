@@ -240,7 +240,7 @@ DEFINE_CVAR(vr_gunmodely, 0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_projectilespawn_z_offset, 24, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_crosshairy, 0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_world_scale, 1.0, CVAR_ARCHIVE); 
-DEFINE_CVAR(vr_floor_offset, -16, CVAR_ARCHIVE);
+DEFINE_CVAR(vr_floor_offset, 0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_snap_turn, 0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_turn_speed, 1, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_msaa, 4, CVAR_ARCHIVE);
@@ -1148,51 +1148,53 @@ void VR_UpdateScreenContent()
         {
             vr::HmdVector3_t headPos =
                 Matrix34ToVector(ovr_DevicePose->mDeviceToAbsoluteTracking);
-            headOrigin[0] = headPos.v[2];
-            headOrigin[1] = headPos.v[0];
-            headOrigin[2] = headPos.v[1];
+            vec3_t currentHeadOrigin;
+            currentHeadOrigin[0] = headPos.v[2];
+            currentHeadOrigin[1] = headPos.v[0];
+            currentHeadOrigin[2] = headPos.v[1];
 
             vec3_t moveInTracking;
-            _VectorSubtract(headOrigin, lastHeadOrigin, moveInTracking);
+            _VectorSubtract(currentHeadOrigin, lastHeadOrigin, moveInTracking);
             moveInTracking[0] *= -meters_to_units;
             moveInTracking[1] *= -meters_to_units;
             moveInTracking[2] = 0;
             Vec3RotateZ(
                 moveInTracking, vrYaw * M_PI_DIV_180, vr_room_scale_move);
 
-            _VectorCopy(headOrigin, lastHeadOrigin);
-            _VectorSubtract(headOrigin, lastHeadOrigin, headOrigin);
+            // Update last origin for next frame
+            _VectorCopy(currentHeadOrigin, lastHeadOrigin);
+            // Manipulate headPos like quakespasm-openvr does
+            _VectorSubtract(currentHeadOrigin, lastHeadOrigin, currentHeadOrigin);
             headPos.v[0] -= lastHeadOrigin[1];
             headPos.v[2] -= lastHeadOrigin[0];
 
+            // Get orientation
             vr::HmdQuaternion_t headQuatOpenVR =
                 Matrix34ToQuaternion(ovr_DevicePose->mDeviceToAbsoluteTracking);
-            vr::HmdQuaternion_t headQuat = ConvertOpenVRToQuakeQuaternion(headQuatOpenVR);
+            
+            // Get eye-to-head transforms
             vr::HmdVector3_t leyePos =
                 Matrix34ToVector(ovrHMD->GetEyeToHeadTransform(eyes[0].eye));
             vr::HmdVector3_t reyePos =
                 Matrix34ToVector(ovrHMD->GetEyeToHeadTransform(eyes[1].eye));
 
-            for (int axis = 0; axis < 3; ++axis)
-            {
-                leyePos.v[axis] = -leyePos.v[axis];
-                reyePos.v[axis] = -reyePos.v[axis];
-            }
-
+            // Rotate eye offsets by head orientation (no negation - match quakespasm-openvr)
             leyePos = RotateVectorByQuaternion(leyePos, headQuatOpenVR);
             reyePos = RotateVectorByQuaternion(reyePos, headQuatOpenVR);
 
+            // Rotate head position by VR yaw 
             HmdVec3RotateY(&headPos, -vrYaw * M_PI_DIV_180);
 
+            // Rotate eye offsets by VR yaw
             HmdVec3RotateY(&leyePos, -vrYaw * M_PI_DIV_180);
             HmdVec3RotateY(&reyePos, -vrYaw * M_PI_DIV_180);
 
-            vr::HmdVector3_t leftEyeWorld = AddVectors(headPos, leyePos);
-            vr::HmdVector3_t rightEyeWorld = AddVectors(headPos, reyePos);
-            eyes[0].position = ConvertOpenVRToQuakeVector(leftEyeWorld);
-            eyes[1].position = ConvertOpenVRToQuakeVector(rightEyeWorld);
-            eyes[0].orientation = headQuat;
-            eyes[1].orientation = headQuat;
+            // Store eye positions = head + eye offset (like quakespasm-openvr)
+            eyes[0].position = AddVectors(headPos, leyePos);
+            eyes[1].position = AddVectors(headPos, reyePos);
+            // Use raw OpenVR quaternion - QuatToYawPitchRoll expects OpenVR format
+            eyes[0].orientation = headQuatOpenVR;
+            eyes[1].orientation = headQuatOpenVR;
 
             if (vr_debug_pose.value)
             {
@@ -1201,17 +1203,15 @@ void VR_UpdateScreenContent()
                 if (pose_now - last_pose_debug >= 0.25)
                 {
                     vec3_t headAngles;
-                    QuatToYawPitchRoll(headQuat, headAngles);
-                    vr::HmdVector3_t headPosQuake = ConvertOpenVRToQuakeVector(headPos);
-                    Sys_Printf("[VR DEBUG] Head OVR=(%.3f, %.3f, %.3f) Quake=(%.3f, %.3f, %.3f) origin=(%.3f, %.3f, %.3f) yaw/pitch/roll=(%.2f, %.2f, %.2f) vrYaw=%.2f\n",
-                        headPos.v[0], headPos.v[1], headPos.v[2],
-                        headPosQuake.v[0], headPosQuake.v[1], headPosQuake.v[2],
-                        headOrigin[0], headOrigin[1], headOrigin[2],
+                    QuatToYawPitchRoll(headQuatOpenVR, headAngles);
+                    Sys_Printf("[VR DEBUG] Head origin=(%.3f, %.3f, %.3f) yaw/pitch/roll=(%.2f, %.2f, %.2f) vrYaw=%.2f\n",
+                        currentHeadOrigin[0], currentHeadOrigin[1], currentHeadOrigin[2],
                         headAngles[YAW], headAngles[PITCH], headAngles[ROLL], vrYaw);
-                    Sys_Printf("[VR DEBUG] EyeL worldOVR=(%.3f, %.3f, %.3f) → quake=(%.3f, %.3f, %.3f) EyeR worldOVR=(%.3f, %.3f, %.3f) → quake=(%.3f, %.3f, %.3f)\n",
-                        leftEyeWorld.v[0], leftEyeWorld.v[1], leftEyeWorld.v[2],
-                        eyes[0].position.v[0], eyes[0].position.v[1], eyes[0].position.v[2],
-                        rightEyeWorld.v[0], rightEyeWorld.v[1], rightEyeWorld.v[2],
+                    Sys_Printf("[VR DEBUG] EyeL OVR=(%.3f, %.3f, %.3f) → Quake=(%.3f, %.3f, %.3f)\n",
+                        leyePos.v[0], leyePos.v[1], leyePos.v[2],
+                        eyes[0].position.v[0], eyes[0].position.v[1], eyes[0].position.v[2]);
+                    Sys_Printf("[VR DEBUG] EyeR OVR=(%.3f, %.3f, %.3f) → Quake=(%.3f, %.3f, %.3f)\n",
+                        reyePos.v[0], reyePos.v[1], reyePos.v[2],
                         eyes[1].position.v[0], eyes[1].position.v[1], eyes[1].position.v[2]);
                     last_pose_debug = pose_now;
                 }
@@ -1273,6 +1273,15 @@ void VR_UpdateScreenContent()
     cl.aimangles[ROLL] = 0.0;
 
     QuatToYawPitchRoll(eyes[1].orientation, orientation);
+    
+    // FORCED DEBUG: print every 60 frames
+    static int debug_frame_counter = 0;
+    debug_frame_counter++;
+    if (debug_frame_counter % 60 == 0) {
+        vr::HmdQuaternion_t q = eyes[1].orientation;
+        Sys_Printf("FORCED VR DEBUG: quat wxyz=(%.3f,%.3f,%.3f,%.3f) orient=(%.2f,%.2f,%.2f) vrYaw=%.2f\n",
+            q.w, q.x, q.y, q.z, orientation[PITCH], orientation[YAW], orientation[ROLL], vrYaw);
+    }
     
     if (vr_debug_pose.value)
     {
@@ -1417,10 +1426,12 @@ void VR_UpdateScreenContent()
         // We need to scale the view offset position to quake units and rotate it by the current input angles (viewangle - eye orientation)
         QuatToYawPitchRoll(current_eye->orientation, orientation);
 
-        // Eye positions are stored in Quake coordinates already; just scale to Quake units
-        temp[0] = current_eye->position.v[0] * meters_to_units;
-        temp[1] = current_eye->position.v[1] * meters_to_units;
-        temp[2] = current_eye->position.v[2] * meters_to_units;
+        // Convert from OpenVR coordinates to Quake coordinates and scale
+        // OpenVR: +X=right, +Y=up, +Z=backward
+        // Quake:  +X=forward, +Y=left, +Z=up
+        temp[0] = -current_eye->position.v[2] * meters_to_units; // Quake X = -OpenVR Z
+        temp[1] = current_eye->position.v[0] * meters_to_units;  // Quake Y = OpenVR X (TEST: removed negation)
+        temp[2] = current_eye->position.v[1] * meters_to_units;  // Quake Z = +OpenVR Y
 
         float yaw_delta = (r_refdef.viewangles[YAW] - orientation[YAW]);
         Vec3RotateZ(temp, yaw_delta * M_PI_DIV_180, vr_viewOffset);
@@ -1474,37 +1485,25 @@ void VR_SetMatrices()
 
 extern "C" {
 // Get VR eye offset to apply to view matrix
+// NOTE: The eye offset is already applied via vr_viewOffset in view.c (V_CalcRefdef)
+// which adds vr_viewOffset to r_refdef.vieworg. This function returns identity
+// because the offset is already incorporated into the view translation matrix
+// through r_refdef.vieworg in R_SetFrustum().
 void VR_GetViewMatrix(float *matrix)
 {
-    if (!vr_initialized || !current_eye)
-    {
-        // VR not active, return identity
-        memset(matrix, 0, 16 * sizeof(float));
-        matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1.0f; // Identity
-        return;
-    }
+    // Return identity matrix - eye offset already applied via vr_viewOffset
+    memset(matrix, 0, 16 * sizeof(float));
+    matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1.0f;
     
-    // Get eye position offset in Quake coordinates (already converted when pose was read)
-    vec3_t temp;
-    temp[0] = current_eye->position.v[0] * meters_to_units;
-    temp[1] = current_eye->position.v[1] * meters_to_units;
-    temp[2] = current_eye->position.v[2] * meters_to_units;
-    
-    // Create translation matrix for eye offset
-    matrix[0] = 1.0f; matrix[4] = 0.0f; matrix[8] = 0.0f;  matrix[12] = temp[0];
-    matrix[1] = 0.0f; matrix[5] = 1.0f; matrix[9] = 0.0f;  matrix[13] = temp[1];
-    matrix[2] = 0.0f; matrix[6] = 0.0f; matrix[10] = 1.0f; matrix[14] = temp[2];
-    matrix[3] = 0.0f; matrix[7] = 0.0f; matrix[11] = 0.0f; matrix[15] = 1.0f;
-
-    if (vr_debug_pose.value)
+    if (vr_debug_pose.value && vr_initialized && current_eye)
     {
         static double last_viewmatrix_debug = 0;
         double debug_now = Sys_DoubleTime();
         if (debug_now - last_viewmatrix_debug >= 0.5)
         {
             int eye_index = current_eye ? current_eye->index : -1;
-            Sys_Printf("[VR DEBUG] ViewMatrix eye=%d translation=(%.2f, %.2f, %.2f)\n",
-                eye_index, temp[0], temp[1], temp[2]);
+            Sys_Printf("[VR DEBUG] VR_GetViewMatrix eye=%d returning identity (offset via vr_viewOffset=%.2f,%.2f,%.2f)\n",
+                eye_index, vr_viewOffset[0], vr_viewOffset[1], vr_viewOffset[2]);
             last_viewmatrix_debug = debug_now;
         }
     }

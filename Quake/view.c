@@ -838,6 +838,8 @@ void V_CalcRefdef (void)
 				eye_count % 2, 
 				r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2],
 				vr_viewOffset[0], vr_viewOffset[1], vr_viewOffset[2]);
+			Sys_Printf("  cl.viewangles=(%.2f, %.2f, %.2f)\n",
+				cl.viewangles[PITCH], cl.viewangles[YAW], cl.viewangles[ROLL]);
 			eye_count++;
 			if (eye_count % 2 == 0) last_vieworg_debug = current_time;
 		} else {
