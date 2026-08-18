@@ -3284,6 +3284,21 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 		pheader->eyeposition[i] = LittleFloat (pinmodel->eyeposition[i]);
 	}
 
+	// save the original scale/origin so VR's Mod_Weapon can apply per-weapon
+	// scale/offset transforms to them (quakespasm-openvr parity; without this
+	// original_scale stays zero and VR weapons render at zero size)
+	VectorCopy(pheader->scale, pheader->original_scale);
+	VectorCopy(pheader->scale_origin, pheader->original_scale_origin);
+
+	// FORCED DEBUG: confirm the model's scale/original_scale at load time
+	{
+		Con_Printf ("ALIASLOAD DEBUG: %s scale=(%.3f,%.3f,%.3f) origScale=(%.3f,%.3f,%.3f) pheader=%p\n",
+			mod->name,
+			pheader->scale[0], pheader->scale[1], pheader->scale[2],
+			pheader->original_scale[0], pheader->original_scale[1], pheader->original_scale[2],
+			(void*)pheader);
+	}
+
 //
 // load the skins
 //
@@ -4066,6 +4081,9 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 	aliashdr_t			*outhdr, *surf;
 	size_t				hdrsize;
 
+	// FORCED DEBUG: which models load through the MD5 (r_md5 "Remastered") path
+	Con_Printf ("MD5LOAD DEBUG: %s\n", fname);
+
 	bonepose_t			*outposes;
 	boneinfo_t			*outbones;
 
@@ -4153,6 +4171,12 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 			surf->scale_origin[j] = 0;
 			surf->scale[j] = 1.0;
 		}
+		// save the original scale/origin so VR's Mod_Weapon can apply per-weapon
+		// scale/offset transforms to them (quakespasm-openvr parity; without this
+		// original_scale stays zero and VR weapons load via the r_md5 path render
+		// at zero size and are invisible)
+		VectorCopy(surf->scale, surf->original_scale);
+		VectorCopy(surf->scale_origin, surf->original_scale_origin);
 
 		surf->numbones = numjoints;
 		surf->boneinfo = (byte*)outbones-(byte*)surf;

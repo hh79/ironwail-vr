@@ -558,6 +558,18 @@ void Mod_Weapon(const char* name, aliashdr_t* hdr)
 
         VectorAdd(hdr->original_scale_origin, ofs, hdr->scale_origin);
         VectorScale(hdr->scale_origin, scaleCorrect, hdr->scale_origin);
+
+        // FORCED DEBUG: confirm the per-weapon VR scale/offset is applied
+        {
+            static int mod_weapon_debug_counter = 0;
+            if (++mod_weapon_debug_counter % 120 == 0)
+                Con_Printf("MODWEAPON DEBUG: %s entry=%d hdr=%p origScale=(%.2f,%.2f,%.2f) scale=(%.2f,%.2f,%.2f) origin=(%.2f,%.2f,%.2f) ofs=(%.1f,%.1f,%.1f)\n",
+                    name, weaponCVarEntry, (void*)hdr,
+                    hdr->original_scale[0], hdr->original_scale[1], hdr->original_scale[2],
+                    hdr->scale[0], hdr->scale[1], hdr->scale[2],
+                    hdr->scale_origin[0], hdr->scale_origin[1], hdr->scale_origin[2],
+                    ofs[0], ofs[1], ofs[2]);
+        }
     }
 }
 
