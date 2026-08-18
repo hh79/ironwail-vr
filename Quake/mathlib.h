@@ -122,6 +122,8 @@ void R_ConcatTransforms (float in1[3][4], float in2[3][4], float out[3][4]);
 void RotMatFromAngleVector(vec3_t angles, vec3_t mat[3]);
 void AngleVectorFromRotMat(vec3_t mat[3], vec3_t angles);
 void CreateRotMat(int axis, float angle, vec3_t mat[3]);
+void Matrix3x4_RM_Transform4 (const float *matrix, const float *vector, float *product);
+void Matrix3x4_RM_Transform3 (const float *matrix, const float *vector, float *product);
 
 void FloorDivMod (double numer, double denom, int *quotient,
 		int *rem);

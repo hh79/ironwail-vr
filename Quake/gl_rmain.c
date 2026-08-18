@@ -115,6 +115,7 @@ cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};
 cvar_t	r_lerpmove = {"r_lerpmove", "1", CVAR_ARCHIVE};
 cvar_t	r_nolerp_list = {"r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", CVAR_NONE};
 cvar_t	r_noshadow_list = {"r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE};
+cvar_t	r_showskel = {"r_showskel", "0", CVAR_NONE};
 
 extern cvar_t	r_vfog;
 extern cvar_t	vid_fsaa;
@@ -1252,7 +1253,7 @@ static qboolean		debugztest = false;
 R_FlushDebugGeometry
 ================
 */
-static void R_FlushDebugGeometry (void)
+void R_FlushDebugGeometry (void)
 {
 	if (numdebugverts && numdebugidx)
 	{
@@ -1285,7 +1286,7 @@ static void R_FlushDebugGeometry (void)
 R_SetDebugGeometryZTest
 ================
 */
-static void R_SetDebugGeometryZTest (qboolean ztest)
+void R_SetDebugGeometryZTest (qboolean ztest)
 {
 	if (debugztest == ztest)
 		return;
@@ -1320,7 +1321,7 @@ static void R_AddDebugGeometry (const debugvert_t verts[], int numverts, const u
 R_EmitLine
 ================
 */
-static void R_EmitLine (const vec3_t a, const vec3_t b, uint32_t color)
+void R_EmitLine (const vec3_t a, const vec3_t b, uint32_t color)
 {
 	debugvert_t verts[2];
 	uint16_t idx[2];
@@ -1340,7 +1341,7 @@ static void R_EmitLine (const vec3_t a, const vec3_t b, uint32_t color)
 R_EmitWirePoint -- johnfitz -- draws a wireframe cross shape for point entities
 ================
 */
-static void R_EmitWirePoint (const vec3_t origin, uint32_t color)
+void R_EmitWirePoint (const vec3_t origin, uint32_t color)
 {
 	const float Size = 8.f;
 	int i;
@@ -1362,7 +1363,7 @@ R_EmitWireBox -- johnfitz -- draws one axis aligned bounding box
 */
 static const uint16_t boxidx[12*2] = { 0,1, 0,2, 0,4, 1,3, 1,5, 2,3, 2,6, 3,7, 4,5, 4,6, 5,7, 6,7, };
 
-static void R_EmitWireBox (const vec3_t mins, const vec3_t maxs, uint32_t color)
+void R_EmitWireBox (const vec3_t mins, const vec3_t maxs, uint32_t color)
 {
 	int i;
 	debugvert_t v[8];
@@ -1383,7 +1384,7 @@ static void R_EmitWireBox (const vec3_t mins, const vec3_t maxs, uint32_t color)
 R_EmitArrow
 ================
 */
-static void R_EmitArrow (const vec3_t from, const vec3_t to, uint32_t color)
+void R_EmitArrow (const vec3_t from, const vec3_t to, uint32_t color)
 {
 	float	frac, len;
 	vec3_t	center, dir, side, tmp;
@@ -1761,6 +1762,31 @@ static void R_ShowBoundingBoxes (void)
 
 /*
 ===============
+R_ShowSkeletons
+===============
+*/
+static void R_ShowSkeletons (void)
+{
+	int		*ofs;
+	entity_t **entlist = cl_sorted_visedicts;
+
+	if (!r_showskel.value || cl.maxclients > 1)
+		return;
+
+	GL_BeginGroup ("Skeletons");
+
+	R_SetDebugGeometryZTest (false);
+
+	ofs = cl_modtype_ofs;
+	R_DrawAliasModels_ShowSkel (entlist + ofs[2*mod_alias ], ofs[2*mod_alias +2] - ofs[2*mod_alias ]);
+
+	R_FlushDebugGeometry ();
+
+	GL_EndGroup ();
+}
+
+/*
+===============
 R_ShowPointFile
 ===============
 */
@@ -1962,8 +1988,6 @@ void R_RenderScene (void)
 
 	Fog_EnableGFog (); //johnfitz
 
-	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
-
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
@@ -1984,12 +2008,15 @@ void R_RenderScene (void)
 
 	R_EndTranslucency ();
 
+	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView -- il8r -- moved for oit reasons
+
 	R_ShowTris (); //johnfitz
 
 	R_ShowBoundingBoxes (); //johnfitz
 
 	if (vr_enabled.value && vr_crosshair.value)
 		VR_ShowCrosshair();
+	R_ShowSkeletons ();
 
 	R_ShowPointFile ();
 }
