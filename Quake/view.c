@@ -874,19 +874,32 @@ void V_CalcRefdef (void)
 		for (i=0 ; i<3 ; i++)
 			r_refdef.vieworg[i] += scr_ofsx.value*forward[i] + scr_ofsy.value*right[i] + scr_ofsz.value*up[i];
 
-	V_BoundOffsets ();
+	if (!vr_enabled.value)
+	{
+		V_BoundOffsets ();
+	}
 
 // set up gun position
 	VectorCopy (cl.viewangles, view->angles);
 
 	CalcGunAngle ();
 
-	VectorCopy (ent->origin, view->origin);
-	view->origin[2] += cl.viewheight;
+	// VR controller aiming: place the weapon at the controller instead of the
+	// player origin. Without this the gun sits at the player's chest, far below
+	// the head-mounted eye position, and gets culled (invisible weapon).
+	if (vr_enabled.value && vr_aimmode.value == VR_AIMMODE_CONTROLLER)
+	{
+		VectorAdd (cl.handpos[1], cl.vmeshoffset, view->origin);
+	}
+	else
+	{
+		VectorCopy (ent->origin, view->origin);
+		view->origin[2] += cl.viewheight;
 
-	for (i=0 ; i<3 ; i++)
-		view->origin[i] += forward[i]*bob*0.4;
-	view->origin[2] += bob;
+		for (i=0 ; i<3 ; i++)
+			view->origin[i] += forward[i]*bob*0.4;
+		view->origin[2] += bob;
+	}
 
 	//johnfitz -- removed all gun position fudging code (was used to keep gun from getting covered by sbar)
 	//MarkV -- restored this with r_viewmodel_quake cvar

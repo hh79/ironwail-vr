@@ -1289,9 +1289,6 @@ void GL_SetCanvas (canvastype newcanvas)
 	if (newcanvas == glcanvas.type)
 		return;
 
-	if (vr_enabled.value && !con_forcedup)
-		return;
-
 	glcanvas.type = newcanvas;
 	Draw_GetCanvasTransform (glcanvas.type, &glcanvas.transform);
 	Draw_GetTransformBounds (&glcanvas.transform, &glcanvas.left, &glcanvas.top, &glcanvas.right, &glcanvas.bottom);

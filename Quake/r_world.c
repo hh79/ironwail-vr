@@ -543,6 +543,15 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	if (!totalinst)
 		return;
 
+	// FORCED DEBUG: show whether water entities are collected per pass
+	{
+		static int water_debug_counter = 0;
+		if (++water_debug_counter % 60 == 0)
+			Con_Printf ("WATER DEBUG: %s pass, ents=%d inst=%d oit=%d\n",
+				translucent ? "translucent" : "opaque", count, totalinst,
+				(int)(translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT));
+	}
+
 	GL_BeginGroup (translucent ? "Water (translucent)" : "Water (opaque)");
 
 	// setup state

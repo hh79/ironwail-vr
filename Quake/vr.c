@@ -1697,6 +1697,12 @@ void VR_Draw2D()
         oldconwidth = vid.conwidth,
         oldconheight = vid.conheight;
 
+    // Set up ironwail's 2D state (canvas transform + viewport) while glwidth/
+    // glheight still match the eye framebuffer. Without this the 2D canvas
+    // transform is never initialized (GL_SetCanvas used to bail out in VR) and
+    // the HUD/menu draw at garbage NDC positions - invisible.
+    GL_Set2D();
+
     glwidth = 320;
     glheight = 200;
 

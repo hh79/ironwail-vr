@@ -596,6 +596,15 @@ R_GetEffectiveAlphaMode
 */
 alphamode_t R_GetEffectiveAlphaMode (void)
 {
+	// VR has no OIT buffer (R_SetupGL sets framesetup.oit_fbo = 0 in VR).
+	// Using OIT would bind framebuffer 0 (the window) in R_BeginTranslucency /
+	// R_EndTranslucency, drawing translucent water/entities/particles into the
+	// window (invisible in the HMD) and leaving framebuffer 0 bound so the 2D
+	// overlay also misses the eye framebuffer. Fall back to sorted alpha
+	// blending straight into the eye framebuffer.
+	extern cvar_t vr_enabled;
+	if (vr_enabled.value)
+		return ALPHAMODE_SORTED;
 	if (map_checks.value)
 		return ALPHAMODE_BASIC;
 	return R_GetAlphaMode ();
