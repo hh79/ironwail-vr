@@ -35,6 +35,8 @@ void SCR_DrawConsole();
 void SCR_DrawLoading();
 void Scrap_Upload();
 void Draw_Flush();
+void R_VRWarpScaleView(GLuint srctex, GLuint dstfbo, int width, int height);
+extern qboolean water_warp;
 }
 
 typedef struct {
@@ -143,11 +145,9 @@ void SCR_UpdateScreenContent()
 	
 	V_RenderView();
 	
-	if (vr_enabled.value && !con_forcedup)
-	{
-		VR_Draw2D();
-	}
-	else
+	// The per-eye 2D overlay is drawn by RenderScreenForCurrentEye_OVR after
+	// the MSAA resolve / water warp, so the HUD stays crisp and unwarped.
+	if (!vr_enabled.value || con_forcedup)
 	{
 		extern void GL_Set2D();
 		GL_Set2D();
@@ -197,6 +197,13 @@ vr::TrackedDevicePose_t ovr_DevicePose[vr::k_unMaxTrackedDeviceCount];
 
 static vr_eye_t eyes[2];
 static vr_eye_t *current_eye = NULL;
+
+// Shared non-MSAA FBO that holds the underwater-warped eye image before the
+// 2D overlay. Eyes render sequentially, so one composite is enough; it is
+// only used while water_warp is active (the flat path's r_waterwarp).
+static fbo_t composite_fbo = {0};
+static qboolean composite_fbo_valid = false;
+static GLuint vr_submit_fbo = 0; // final per-eye target for gamma correction
 static vr_controller controllers[2];
 static vec3_t lastOrientation = { 0, 0, 0 };
 static vec3_t lastAim = { 0, 0, 0 };
@@ -359,6 +366,20 @@ void CreateMSAA(fbo_t* fbo, int width, int height, int msaa)
     if (status != GL_FRAMEBUFFER_COMPLETE)
     {
         Con_Printf("Framebuffer incomplete %x", status);
+    }
+}
+
+static void VR_EnsureCompositeFBO(int width, int height)
+{
+    if (!composite_fbo_valid)
+    {
+        composite_fbo = CreateFBO(width, height);
+        composite_fbo_valid = true;
+    }
+    else if ((int)composite_fbo.size.width != width ||
+             (int)composite_fbo.size.height != height)
+    {
+        RecreateTextures(&composite_fbo, width, height);
     }
 }
 
@@ -1048,7 +1069,10 @@ static void RenderScreenForCurrentEye_OVR()
 
     SCR_UpdateScreenContent();
 
-    // Generate the eye texture and send it to the HMD
+    // Resolve MSAA (if any), then underwater-warp the scene into the shared
+    // composite FBO, draw the 2D overlay, gamma correct and submit.
+    GLuint final_fbo = current_eye->fbo.framebuffer;
+    GLuint final_tex = current_eye->fbo.texture;
 
     if (current_eye->fbo.msaa > 0)
     {
@@ -1059,13 +1083,31 @@ static void RenderScreenForCurrentEye_OVR()
         glDrawBuffer(GL_BACK);
         glBlitFramebufferEXT(0, 0, glwidth, glheight, 0, 0, glwidth, glheight,
             GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        GLSLGamma_GammaCorrect();
-    } else {
-        GLSLGamma_GammaCorrect();
     }
 
+    if (water_warp)
+    {
+        // Classic Quake underwater waviness, like the flat path's
+        // R_WarpScaleView. The 2D overlay is drawn onto the composite
+        // afterwards so the HUD stays crisp and unwarped.
+        VR_EnsureCompositeFBO((int)glwidth, (int)glheight);
+        R_VRWarpScaleView(current_eye->fbo.texture, composite_fbo.framebuffer,
+            (int)glwidth, (int)glheight);
+        final_fbo = composite_fbo.framebuffer;
+        final_tex = composite_fbo.texture;
+    }
+
+    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, final_fbo);
+
+    VR_Draw2D();
+
+    vr_submit_fbo = final_fbo;
+    GLSLGamma_GammaCorrect();
+    vr_submit_fbo = 0;
+
+    // Generate the eye texture and send it to the HMD
     vr::Texture_t eyeTexture = {
-        reinterpret_cast<void*>(uintptr_t(current_eye->fbo.texture)),
+        reinterpret_cast<void*>(uintptr_t(final_tex)),
         vr::TextureType_OpenGL, vr::ColorSpace_Gamma };
     vr::VRCompositor()->Submit(current_eye->eye, &eyeTexture);
 
@@ -1078,12 +1120,11 @@ static void RenderScreenForCurrentEye_OVR()
 
 void VR_HandleGammaCorrect()
 {
-    if (current_eye)
-    {
-        glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, current_eye->fbo.framebuffer);
-    } else {
-        glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, eyes[0].fbo.framebuffer);
-    }
+    // Bind the final per-eye target: the composite FBO when the scene was
+    // underwater-warped, otherwise the eye's own framebuffer.
+    GLuint target = vr_submit_fbo ? vr_submit_fbo :
+        (current_eye ? current_eye->fbo.framebuffer : eyes[0].fbo.framebuffer);
+    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, target);
     glReadBuffer(GL_FRONT);
 }
 

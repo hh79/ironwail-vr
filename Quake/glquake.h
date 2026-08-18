@@ -657,6 +657,7 @@ void GL_AddGarbageBuffer (GLuint handle);
 qboolean GL_NeedsSceneEffects (void);
 qboolean GL_NeedsPostprocess (void);
 void GL_PostProcess (void);
+void R_VRWarpScaleView (GLuint srctex, GLuint dstfbo, int width, int height);
 
 float GL_WaterAlphaForTextureType (textype_t type);
 

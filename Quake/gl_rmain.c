@@ -2040,6 +2040,10 @@ void R_WarpScaleView (void)
 	GLuint fbodest;
 	double t;
 
+	extern cvar_t vr_enabled;
+	if (vr_enabled.value)
+		return;	// VR warps each eye itself (R_VRWarpScaleView) after the per-eye MSAA resolve
+
 	if (!GL_NeedsSceneEffects ())
 		return;
 
@@ -2093,6 +2097,45 @@ void R_WarpScaleView (void)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, msaa ? framebufs.resolved_scene.color_tex : framebufs.scene.color_tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
+
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+
+	GL_EndGroup ();
+}
+
+/*
+================
+R_VRWarpScaleView
+
+Underwater-warp the resolved per-eye scene texture into the eye composite
+FBO, mirroring the warp branch of R_WarpScaleView for an arbitrary source
+texture and destination FBO. Called from the VR path (vr.c) after the eye
+MSAA resolve and before the 2D overlay, so the HUD stays crisp and the
+scene gets the classic underwater waviness.
+================
+*/
+void R_VRWarpScaleView (GLuint srctex, GLuint dstfbo, int width, int height)
+{
+	double t;
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, dstfbo);
+	glViewport (0, 0, width, height);
+
+	GL_BeginGroup ("VR warp view");
+
+	GL_UseProgram (glprogs.warpscale[1]); // water warp variant
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+
+	t = M_ForcedUnderwater () ? realtime : cl.time;
+	GL_Uniform4fFunc (0, 1.f, 1.f, 1.f/256.f, (float)t);
+	if (v_blend[3] && gl_polyblend.value && !softemu)
+		GL_Uniform4fvFunc (1, 1, v_blend);
+	else
+		GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
+
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, srctex);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 

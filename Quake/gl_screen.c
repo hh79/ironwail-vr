@@ -726,7 +726,7 @@ static qboolean SCR_IsClockVisible (void)
 SCR_DrawFPS -- johnfitz
 ==============
 */
-static void SCR_DrawFPS (void)
+void SCR_DrawFPS (void)
 {
 	static double	oldtime = 0;
 	static double	lastfps = 0;
@@ -844,7 +844,7 @@ static void SCR_DrawSpeed (void)
 SCR_DrawClock -- johnfitz
 ==============
 */
-static void SCR_DrawClock (void)
+void SCR_DrawClock (void)
 {
 	char	str[12];
 
@@ -1015,7 +1015,7 @@ static void SCR_DrawDemoControls (void)
 SCR_DrawDevStats
 ==============
 */
-static void SCR_DrawDevStats (void)
+void SCR_DrawDevStats (void)
 {
 	char	str[40];
 	int		y = 25-10; //10=number of lines to print
@@ -1064,7 +1064,7 @@ static void SCR_DrawDevStats (void)
 SCR_DrawTurtle
 ==============
 */
-static void SCR_DrawTurtle (void)
+void SCR_DrawTurtle (void)
 {
 	static int	count;
 
@@ -1091,7 +1091,7 @@ static void SCR_DrawTurtle (void)
 SCR_DrawNet
 ==============
 */
-static void SCR_DrawNet (void)
+void SCR_DrawNet (void)
 {
 	if (realtime - cl.last_received_message < 0.3)
 		return;
@@ -1108,7 +1108,7 @@ static void SCR_DrawNet (void)
 DrawPause
 ==============
 */
-static void SCR_DrawPause (void)
+void SCR_DrawPause (void)
 {
 	qpic_t	*pic;
 	float	alpha;
@@ -1144,7 +1144,7 @@ static void SCR_DrawPause (void)
 SCR_DrawLoading
 ==============
 */
-static void SCR_DrawLoading (void)
+void SCR_DrawLoading (void)
 {
 	qpic_t	*pic;
 
@@ -1593,7 +1593,7 @@ static void SCR_SetUpToDrawConsole (void)
 SCR_DrawConsole
 ==================
 */
-static void SCR_DrawConsole (void)
+void SCR_DrawConsole (void)
 {
 	if (scr_con_current)
 	{
@@ -1966,7 +1966,7 @@ void SCR_EndLoadingPlaque (void)
 const char	*scr_notifystring;
 qboolean	scr_drawdialog;
 
-static void SCR_DrawNotifyString (void)
+void SCR_DrawNotifyString (void)
 {
 	const char	*start;
 	int		l;
@@ -2066,7 +2066,7 @@ johnfitz -- modified to use glwidth/glheight instead of vid.width/vid.height
 	    also added scr_tileclear_updates
 ==================
 */
-static void SCR_TileClear (void)
+void SCR_TileClear (void)
 {
 	//ericw -- added check for glsl gamma. TODO: remove this ugly optimization?
 	if (scr_tileclear_updates >= vid.numpages && !gl_clear.value && vid_gamma.value == 1)
