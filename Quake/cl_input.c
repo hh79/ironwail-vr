@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // rights reserved.
 
 #include "quakedef.h"
+#include "vr.h"
 
 extern cvar_t cl_maxpitch; //johnfitz -- variable pitch clamping
 extern cvar_t cl_minpitch; //johnfitz -- variable pitch clamping
@@ -403,10 +404,14 @@ void CL_SendMove (const usercmd_t *cmd)
 
 		for (i=0 ; i<3 ; i++)
 			//johnfitz -- 16-bit angles for PROTOCOL_FITZQUAKE
+			// quakespasm-openvr parity: in VR the server must receive the AIM
+			// angles (controller direction for VR_AIMMODE_CONTROLLER) so shots
+			// follow the weapon/controller, not the head. Outside VR the port
+			// tracks the aim in cl.viewangles (cl.aimangles is VR-only here).
 			if (cl.protocol == PROTOCOL_NETQUAKE)
-				MSG_WriteAngle (&buf, cl.viewangles[i], cl.protocolflags);
+				MSG_WriteAngle (&buf, (vr_enabled.value ? cl.aimangles : cl.viewangles)[i], cl.protocolflags);
 			else
-				MSG_WriteAngle16 (&buf, cl.viewangles[i], cl.protocolflags);
+				MSG_WriteAngle16 (&buf, (vr_enabled.value ? cl.aimangles : cl.viewangles)[i], cl.protocolflags);
 			//johnfitz
 
 		MSG_WriteShort (&buf, cmd->forwardmove);
