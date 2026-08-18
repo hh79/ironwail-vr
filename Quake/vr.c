@@ -1241,10 +1241,14 @@ void VR_UpdateScreenContent()
     if (debug_frame_counter % 60 == 0) {
         vr::HmdQuaternion_t q = eyes[1].orientation;
         vr::HmdMatrix44_t pm = ovrHMD->GetProjectionMatrix(eyes[0].eye, 4.f, gl_farclip.value);
-        Sys_Printf("FORCED VR DEBUG: quat wxyz=(%.3f,%.3f,%.3f,%.3f) orient=(%.2f,%.2f,%.2f) vrYaw=%.2f fov=(%.1f,%.1f)/(%.1f,%.1f) tan=(%.2f,%.2f,%.2f,%.2f) target=%.0fx%.0f proj=(%.4f,%.4f,%.4f,%.4f)\n",
+        float dl = (1.f - pm.m[0][2]) / pm.m[0][0];
+        float dr = (1.f + pm.m[0][2]) / pm.m[0][0];
+        float du = (1.f + pm.m[1][2]) / pm.m[1][1];
+        float dd = (1.f - pm.m[1][2]) / pm.m[1][1];
+        Sys_Printf("FORCED VR DEBUG: quat wxyz=(%.3f,%.3f,%.3f,%.3f) orient=(%.2f,%.2f,%.2f) vrYaw=%.2f fov=(%.1f,%.1f)/(%.1f,%.1f) projTan=(%.2f,%.2f,%.2f,%.2f) target=%.0fx%.0f proj=(%.4f,%.4f,%.4f,%.4f)\n",
             q.w, q.x, q.y, q.z, orientation[PITCH], orientation[YAW], orientation[ROLL], vrYaw,
             eyes[0].fov_x, eyes[0].fov_y, eyes[1].fov_x, eyes[1].fov_y,
-            eyes[0].tan_left, eyes[0].tan_right, eyes[0].tan_up, eyes[0].tan_down,
+            dl, dr, du, dd,
             eyes[0].fbo.size.width, eyes[0].fbo.size.height,
             pm.m[0][0], pm.m[0][2], pm.m[1][1], pm.m[1][2]);
     }
@@ -1480,20 +1484,25 @@ extern "C" qboolean VR_BuildProjectionMatrix(float *matrix, float znear, float z
 {
 	// Builds the per-eye projection matrix in ironwail's matrix convention
 	// (column-major; camera forward=+X, right=+Y, up=+Z; clip.x = -w*y, clip.w = x).
-	// Uses the asymmetric OpenVR projection tangents so each eye's frustum matches
-	// the HMD lens exactly: the symmetric GL_FrustumMatrix crops the outer half of
-	// the eye (culling holes) and stretches the image asymmetrically (fishbowl and
-	// broken stereo), because the real per-eye projection is wider on the outer side.
+	// The frustum extents are derived from the driver's OpenVR projection matrix
+	// so the render matches the HMD lens exactly. The raw GetProjectionRaw tangents
+	// are NOT reliable: on some drivers (e.g. Quest via Steam Link) up/down are
+	// returned swapped, which mirrors the vertical projection (fishbowl) and makes
+	// the cull frustum too tight on one side. For a standard OpenVR projection
+	// (clip.x = m00*x + m02*z, clip.w = -z):
+	//   left  = (1 - m02)/m00, right = (1 + m02)/m00
+	//   top   = (1 + m12)/m11, bottom = (1 - m12)/m11
 	// For symmetric tangents this reduces exactly to GL_FrustumMatrix.
 	extern qboolean gl_clipcontrol_able;
 
 	if (!vr_initialized || !current_eye)
 		return false;
 
-	const float l = -current_eye->tan_left;   // positive left tangent
-	const float r =  current_eye->tan_right;  // positive right tangent
-	const float u = -current_eye->tan_up;     // positive up tangent
-	const float d =  current_eye->tan_down;   // positive down tangent
+	vr::HmdMatrix44_t p = ovrHMD->GetProjectionMatrix(current_eye->eye, znear, zfar);
+	const float l = (1.f - p.m[0][2]) / p.m[0][0];   // positive left tangent
+	const float r = (1.f + p.m[0][2]) / p.m[0][0];   // positive right tangent
+	const float u = (1.f + p.m[1][2]) / p.m[1][1];   // positive up (top) tangent
+	const float d = (1.f - p.m[1][2]) / p.m[1][1];   // positive down (bottom) tangent
 
 	memset(matrix, 0, 16 * sizeof(float));
 
