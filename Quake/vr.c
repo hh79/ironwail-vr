@@ -33,6 +33,8 @@ void SCR_DrawFPS();
 void SCR_DrawClock();
 void SCR_DrawConsole();
 void SCR_DrawLoading();
+void Scrap_Upload();
+void Draw_Flush();
 }
 
 typedef struct {
@@ -1714,6 +1716,10 @@ void VR_Draw2D()
     // the HUD/menu draw at garbage NDC positions - invisible.
     GL_Set2D();
 
+    // Ensure the small-pic atlas is uploaded before any HUD/menu quad is drawn;
+    // Scrap_Upload is a no-op (CRC match) when nothing changed.
+    Scrap_Upload();
+
     glwidth = 320;
     glheight = 200;
 
@@ -1739,14 +1745,16 @@ void VR_Draw2D()
     vec3lerp(smoothedTarget, lastMenuPosition, target, 0.2);
     VectorCopy(smoothedTarget, lastMenuPosition);
 
-    // Build the 2D billboard matrix: NDC quad -> 3D billboard (320x200 scaled
-    // world units) 1m in front of the eye, rendered through the per-eye
-    // view-projection. The GUI shader applies this so the overlay converges
-    // correctly in stereo (matches quakespasm-openvr's 3D-placed 2D).
+    // Build the 2D billboard matrix: NDC quad -> 3D billboard in front of the
+    // eye, rendered through the per-eye view-projection. The GUI shader applies
+    // this so the overlay converges correctly in stereo (matches quakespasm-openvr's
+    // 3D-placed 2D). The billboard aspect must match the GUI aspect (guiwidth:
+    // guiheight) or the content is squashed - the canvas maps the whole gui
+    // screen to the NDC quad.
     {
         extern float r_matviewproj[16];
         float W = 320.f * scale_hud;
-        float H = 200.f * scale_hud;
+        float H = W * (float)vid.guiheight / (float)q_max (vid.guiwidth, 1);
         float model[16];
         memset(model, 0, sizeof(model));
         // canvas: gui x=0 (left) -> NDC -1, gui y=0 (top) -> NDC +1
@@ -1823,14 +1831,21 @@ void VR_Draw2D()
         M_Draw();
     }
 
-    glDisable(GL_BLEND);
-    glEnable(GL_DEPTH_TEST);
-    glPopMatrix();
-
     if(draw_sbar)
     {
         VR_DrawSbar();
     }
+
+    // Flush the 2D batch while GL_BLEND is still enabled. GL_SetState only
+    // programs the blend function, it does NOT re-enable GL_BLEND - flushing
+    // after glDisable(GL_BLEND) would draw every quad with blending off, so
+    // the transparent (scrap 255) regions render opaque with their
+    // alpha-edge-fixed colors (the orangish/pinkish background wash).
+    Draw_Flush();
+
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+    glPopMatrix();
 
     glwidth = oldglwidth;
     glheight = oldglheight;

@@ -1207,6 +1207,18 @@ void R_DrawViewModel (void)
 {
 	entity_t *e = &cl.viewent;
 
+	// FORCED DEBUG: weapon state (rate-limited)
+	{
+		static int viewmodel_state_counter = 0;
+		if (++viewmodel_state_counter % 60 == 0)
+			Con_Printf ("VIEWMODEL DEBUG: model=%p type=%d org=(%.1f,%.1f,%.1f) ang=(%.1f,%.1f,%.1f) visible=%d drawvm=%d drawent=%d chase=%d viewsize=%g\n",
+				(void*)e->model, e->model ? (int)e->model->type : -1,
+				e->origin[0], e->origin[1], e->origin[2],
+				e->angles[0], e->angles[1], e->angles[2],
+				(int)R_IsViewModelVisible (),
+				(int)r_drawviewmodel.value, (int)r_drawentities.value, (int)chase_active.value, scr_viewsize.value);
+	}
+
 	if (!R_IsViewModelVisible ())
 		return;
 

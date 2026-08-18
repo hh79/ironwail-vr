@@ -224,6 +224,12 @@ Scrap_Upload -- johnfitz -- now uses TexMgr
 */
 void Scrap_Upload (void)
 {
+	// FORCED DEBUG: confirm the small-pic atlas actually gets re-uploaded
+	{
+		static int scrap_debug_counter = 0;
+		if (scrap_dirty && ++scrap_debug_counter % 30 == 0)
+			Con_Printf ("SCRAP DEBUG: uploading scrap atlas (dirty)\n");
+	}
 	scrap_texture = TexMgr_LoadImage (NULL, "scrap", SCRAP_ATLAS_WIDTH, SCRAP_ATLAS_HEIGHT, SRC_INDEXED, scrap_texels,
 		"", (src_offset_t)scrap_texels, TEXPREF_ALPHA | TEXPREF_OVERWRITE | TEXPREF_NOPICMIP);
 	scrap_dirty = false;
@@ -589,6 +595,14 @@ void Draw_Flush (void)
 
 	if (!numbatchquads)
 		return;
+
+	// FORCED DEBUG: what is the 2D actually drawing (rate-limited)
+	{
+		static int draw_flush_debug_counter = 0;
+		if (++draw_flush_debug_counter % 60 == 0)
+			Con_Printf ("DRAWFLUSH DEBUG: tex=%s blend=%u quads=%d\n",
+				glcanvas.texture ? glcanvas.texture->name : "NULL", glcanvas.blendmode, numbatchquads);
+	}
 
 	if (scrap_dirty && glcanvas.texture == scrap_texture)
 		Scrap_Upload ();

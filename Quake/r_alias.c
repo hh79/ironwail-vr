@@ -423,6 +423,17 @@ void R_FlushAliasInstances (qboolean showtris)
 		if (!textures[1])
 			textures[1] = blacktexture;
 
+		// FORCED DEBUG: weapon instance draw state (rate-limited)
+		if (ibuf.ent == &cl.viewent)
+		{
+			static int weapon_draw_debug_counter = 0;
+			if (++weapon_draw_debug_counter % 60 == 0)
+				Con_Printf ("VIEWMODEL DRAW: model=%s skin=%p fb=%p pose1=%d pose2=%d alpha=%g inst=%d\n",
+					model->name, (void*)textures[0], (void*)textures[1],
+					ibuf.inst[0].pose1, ibuf.inst[0].pose2,
+					ibuf.inst[0].alpha, ibuf.count);
+		}
+
 		if (showtris)
 		{
 			textures[0] = blacktexture;
@@ -510,8 +521,21 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	//
 	// cull it
 	//
+	// The view model (weapon) must never be frustum-culled: it renders at the
+	// controller position, which can sit at the edge of the tight per-eye VR
+	// frustum (the reference culls with fov+25, far wider). Log if it would
+	// have been culled so we can confirm that was the cause.
 	if (R_CullModelForEntity(e))
-		return;
+	{
+		if (e == &cl.viewent)
+		{
+			static int viewmodel_cull_counter = 0;
+			if (++viewmodel_cull_counter % 60 == 0)
+				Con_Printf ("VIEWMODEL DEBUG: weapon would be culled; drawing anyway\n");
+		}
+		else
+			return;
+	}
 
 	//
 	// transform it
