@@ -594,6 +594,20 @@ void Draw_Flush (void)
 		Scrap_Upload ();
 
 	GL_UseProgram (glprogs.gui);
+	// VR renders the 2D overlay as a 3D billboard through the per-eye projection
+	// (so it converges like quakespasm-openvr); desktop uses identity.
+	{
+		extern qboolean vr_gui_matrix_valid;
+		extern float vr_gui_matrix[16];
+		extern cvar_t vr_enabled;
+		if (vr_enabled.value && vr_gui_matrix_valid)
+			GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, vr_gui_matrix);
+		else
+		{
+			static const float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+			GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, identity);
+		}
+	}
 	GL_SetState (glcanvas.blendmode | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(3));
 	GL_Bind (GL_TEXTURE0, glcanvas.texture);
 
@@ -1306,6 +1320,12 @@ void GL_Set2D (void)
 	glcanvas.blendmode = GLS_BLEND_ALPHA;
 	glcanvas.colorstacktop = 0;
 	glViewport (glx, gly, glwidth, glheight);
+	// Reset the VR 2D billboard flag: the non-VR 2D path (console, desktop)
+	// must use the identity GUI matrix. VR_Draw2D sets it again after this.
+	{
+		extern qboolean vr_gui_matrix_valid;
+		vr_gui_matrix_valid = false;
+	}
 	GL_SetCanvas (CANVAS_DEFAULT);
 	GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 }

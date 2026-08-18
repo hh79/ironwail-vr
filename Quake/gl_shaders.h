@@ -38,6 +38,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 ////////////////////////////////////////////////////////////////
 
 static const char gui_vertex_shader[] =
+"layout(location=0) uniform mat4 Matrix;\n"
 "layout(location=0) in vec2 in_pos;\n"
 "layout(location=1) in vec2 in_uv;\n"
 "layout(location=2) in vec4 in_color;\n"
@@ -47,7 +48,7 @@ static const char gui_vertex_shader[] =
 "\n"
 "void main()\n"
 "{\n"
-"	gl_Position = vec4(in_pos, 0.0, 1.0);\n"
+"	gl_Position = Matrix * vec4(in_pos, 0.0, 1.0);\n"
 "	out_uv = in_uv;\n"
 "	out_color = in_color;\n"
 "}\n";
@@ -84,12 +85,21 @@ static const char viewblend_vertex_shader[] =
 
 static const char viewblend_fragment_shader[] =
 "layout(location=0) uniform vec4 Color;\n"
+"layout(location=1) uniform vec2 ScreenSize; // (0,0) = flat fill; else vignette\n"
 "\n"
 "layout(location=0) out vec4 out_fragcolor;\n"
 "\n"
 "void main()\n"
 "{\n"
 "	out_fragcolor = Color;\n"
+"	if (ScreenSize.x > 0.0)\n"
+"	{\n"
+"		// VR: damage flash as a vignette (clear center, red periphery) so the\n"
+"		// full-FOV tint doesn't blind the player.\n"
+"		vec2 uv = gl_FragCoord.xy / ScreenSize;\n"
+"		float d = distance(uv, vec2(0.5, 0.5));\n"
+"		out_fragcolor.a *= smoothstep(0.30, 0.60, d);\n"
+"	}\n"
 "}\n";
 
 ////////////////////////////////////////////////////////////////

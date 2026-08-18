@@ -1686,6 +1686,17 @@ void vec3lerp(vec3_t out, vec3_t start, vec3_t end, double f)
     out[2] = lerp(start[2], end[2], f);
 }
 
+// Per-eye 2D billboard matrix (ViewProj * model), consumed by the GUI shader
+// (Draw_Flush) when vr_enabled. Rendering the 2D overlay through the eye's
+// projection makes the menu/HUD converge in stereo exactly like quakespasm-openvr,
+// which draws the 2D through the eye's asymmetric projection with a billboard
+// modelview. A flat NDC overlay would bypass the per-eye projection (no nasal
+// shift) and not converge.
+extern "C" {
+qboolean vr_gui_matrix_valid = false;
+float vr_gui_matrix[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+}
+
 void VR_Draw2D()
 {
     qboolean draw_sbar = false;
@@ -1727,6 +1738,38 @@ void VR_Draw2D()
     vec3_t smoothedTarget;
     vec3lerp(smoothedTarget, lastMenuPosition, target, 0.2);
     VectorCopy(smoothedTarget, lastMenuPosition);
+
+    // Build the 2D billboard matrix: NDC quad -> 3D billboard (320x200 scaled
+    // world units) 1m in front of the eye, rendered through the per-eye
+    // view-projection. The GUI shader applies this so the overlay converges
+    // correctly in stereo (matches quakespasm-openvr's 3D-placed 2D).
+    {
+        extern float r_matviewproj[16];
+        float W = 320.f * scale_hud;
+        float H = 200.f * scale_hud;
+        float model[16];
+        memset(model, 0, sizeof(model));
+        // canvas: gui x=0 (left) -> NDC -1, gui y=0 (top) -> NDC +1
+        // column-major: model[col*4+row]
+        model[0*4+0] =  right[0] * W * 0.5f;   // col0 = x coeff along right
+        model[0*4+1] =  right[1] * W * 0.5f;
+        model[0*4+2] =  right[2] * W * 0.5f;
+        model[1*4+0] =  up[0] * H * 0.5f;      // col1 = y coeff along up
+        model[1*4+1] =  up[1] * H * 0.5f;
+        model[1*4+2] =  up[2] * H * 0.5f;
+        model[3*4+0] =  smoothedTarget[0];     // col3 = translation
+        model[3*4+1] =  smoothedTarget[1];
+        model[3*4+2] =  smoothedTarget[2];
+        model[3*4+3] =  1.f;
+        // viewproj = ViewProj * Model (MatrixMultiply is in-place: left = left*right)
+        {
+            float viewproj[16];
+            memcpy (viewproj, r_matviewproj, sizeof (viewproj));
+            MatrixMultiply (viewproj, model);
+            memcpy (vr_gui_matrix, viewproj, sizeof (viewproj));
+        }
+        vr_gui_matrix_valid = true;
+    }
 
     glTranslatef(smoothedTarget[0], smoothedTarget[1], smoothedTarget[2]);
 

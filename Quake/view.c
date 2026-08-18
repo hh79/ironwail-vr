@@ -600,6 +600,16 @@ void V_PolyBlend (void)
 	GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
 	GL_Uniform4fvFunc (0, 1, v_blend);
 
+	// VR: render the color shift as a vignette (clear center) so the full-FOV
+	// damage/bonus flash doesn't blind the player; desktop keeps the flat fill.
+	{
+		extern cvar_t vr_enabled;
+		if (vr_enabled.value)
+			GL_Uniform2fFunc (1, (float)glwidth, (float)glheight);
+		else
+			GL_Uniform2fFunc (1, 0.f, 0.f);
+	}
+
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	v_blend[3] = 0.f; // make sure this doesn't get applied again later in the pipeline
