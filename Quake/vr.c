@@ -550,11 +550,24 @@ void Mod_Weapon(const char* name, aliashdr_t* hdr)
         float scaleCorrect = (vr_world_scale.value / 0.75f) * vr_gunmodelscale.value; //initial version had 0.75 default world scale, so weapons reflect that
         VectorScale(hdr->original_scale, vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 3].value * scaleCorrect, hdr->scale);
 
-        vec3_t ofs = {
-            vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON].value,
-            vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 1].value,
-            vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 2].value + vr_gunmodely.value
-        };
+        vec3_t ofs;
+        if (hdr->poseverttype == aliashdr_t::PV_IQM)
+        {
+            // r_md5 "Remastered" weapons: their grip sits at the model origin
+            // (the rerelease .md5mesh "weapon" joint is ~at 0,0,0), so the
+            // .mdl-tuned per-weapon offsets would float the gun ~30cm above the
+            // controller. Anchor the gun at the controller; vr_gunmodely still
+            // applies as a manual up/down trim.
+            ofs[0] = 0;
+            ofs[1] = 0;
+            ofs[2] = vr_gunmodely.value;
+        }
+        else
+        {
+            ofs[0] = vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON].value;
+            ofs[1] = vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 1].value;
+            ofs[2] = vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 2].value + vr_gunmodely.value;
+        }
 
         VectorAdd(hdr->original_scale_origin, ofs, hdr->scale_origin);
         VectorScale(hdr->scale_origin, scaleCorrect, hdr->scale_origin);

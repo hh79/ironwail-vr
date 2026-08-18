@@ -600,14 +600,30 @@ void V_PolyBlend (void)
 	GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
 	GL_Uniform4fvFunc (0, 1, v_blend);
 
-	// VR: render the color shift as a vignette (clear center) so the full-FOV
-	// damage/bonus flash doesn't blind the player; desktop keeps the flat fill.
+	// VR: render the color shift as a transparent overlay - a vignette with a
+	// clear center and a much weaker alpha than the flat desktop fill, whose
+	// raw strength (damage up to ~0.59 alpha) reads as a solid red/yellow
+	// wash across the whole VR FOV. Desktop keeps the original flat fill.
 	{
 		extern cvar_t vr_enabled;
 		if (vr_enabled.value)
+		{
+			float vrblend[4];
+			// GL_SetState only programs the blend function - re-enable blending
+			// explicitly so the overlay is never drawn opaque (the scene/2D
+			// passes can leave GL_BLEND off).
+			glEnable (GL_BLEND);
+			vrblend[0] = v_blend[0];
+			vrblend[1] = v_blend[1];
+			vrblend[2] = v_blend[2];
+			vrblend[3] = v_blend[3] * 0.35f;
+			GL_Uniform4fvFunc (0, 1, vrblend);
 			GL_Uniform2fFunc (1, (float)glwidth, (float)glheight);
+		}
 		else
+		{
 			GL_Uniform2fFunc (1, 0.f, 0.f);
+		}
 	}
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);

@@ -4174,7 +4174,9 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 		// save the original scale/origin so VR's Mod_Weapon can apply per-weapon
 		// scale/offset transforms to them (quakespasm-openvr parity; without this
 		// original_scale stays zero and VR weapons load via the r_md5 path render
-		// at zero size and are invisible)
+		// at zero size and are invisible). Note: the MD5 rerelease weapons keep
+		// scale_origin 0 — their grip sits at the model origin — so Mod_Weapon
+		// must NOT apply the .mdl-tuned offsets to them (see Mod_Weapon).
 		VectorCopy(surf->scale, surf->original_scale);
 		VectorCopy(surf->scale_origin, surf->original_scale_origin);
 
