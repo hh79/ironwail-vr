@@ -848,20 +848,22 @@ void R_SetFrustum (void)
 	znear = CLAMP (0.5f, d, 4.f);
 	zfar = gl_farclip.value;
 
-	// VR: Always use ironwail's projection format for frustum extraction/culling.
-	// The VR projection matrix (from OpenVR) uses standard OpenGL format which is
-	// incompatible with ironwail's ExtractFrustumPlane. VR_SetMatrices() applies
-	// the actual VR projection for rendering later.
-	GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
+	// VR: use the asymmetric per-eye projection so the frustum matches the HMD
+	// lens exactly (covers the full asymmetric FOV - no outer-edge cropping, no
+	// asymmetric stretch). Falls back to the symmetric ironwail frustum when VR
+	// is inactive or the eye isn't set up yet. The same matrix drives rendering
+	// and culling (ExtractFrustumPlane), so cull always matches the render.
+	if (vr_enabled.value && VR_BuildProjectionMatrix(r_matproj, znear, zfar))
+	{
+		// asymmetric VR projection in ironwail's matrix convention
+	}
+	else
+	{
+		GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
+	}
 
 	// View matrix
 	IdentityMatrix(r_matview);
-
-	// Legacy GLQuake rotated the camera space so Z pointed up and X forward.
-	RotationMatrix(rotation, DEG2RAD(-90.0f), 0);
-	MatrixMultiply(r_matview, rotation);
-	RotationMatrix(rotation, DEG2RAD(90.0f), 2);
-	MatrixMultiply(r_matview, rotation);
 
 	RotationMatrix(rotation, DEG2RAD(-r_refdef.viewangles[ROLL]), 0);
 	MatrixMultiply(r_matview, rotation);

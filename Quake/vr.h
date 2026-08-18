@@ -44,6 +44,7 @@ void VR_Draw2D();
 void VR_Move(usercmd_t *cmd);
 void VR_InitGame();
 qboolean VR_GetProjectionMatrix(float *matrix); // Get VR projection matrix for current eye
+qboolean VR_BuildProjectionMatrix(float *matrix, float znear, float zfar); // Build asymmetric per-eye projection in ironwail matrix convention
 void VR_GetViewMatrix(float *matrix); // Get VR view offset for current eye
 void VR_PushYaw();
 void VR_DrawSbar();

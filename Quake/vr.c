@@ -451,44 +451,6 @@ vr::HmdVector3_t Matrix34ToVector(vr::HmdMatrix34_t in)
     return vector;
 }
 
-static vr::HmdQuaternion_t QuaternionMultiply(const vr::HmdQuaternion_t& a, const vr::HmdQuaternion_t& b)
-{
-    vr::HmdQuaternion_t out;
-    out.w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
-    out.x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
-    out.y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x;
-    out.z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w;
-    return out;
-}
-
-static vr::HmdQuaternion_t QuaternionConjugate(const vr::HmdQuaternion_t& q)
-{
-    vr::HmdQuaternion_t out;
-    out.w = q.w;
-    out.x = -q.x;
-    out.y = -q.y;
-    out.z = -q.z;
-    return out;
-}
-
-static vr::HmdQuaternion_t ConvertOpenVRToQuakeQuaternion(const vr::HmdQuaternion_t& q)
-{
-    static const vr::HmdQuaternion_t basis = { 0.5f, 0.5f, -0.5f, -0.5f };
-    static const vr::HmdQuaternion_t basis_conjugate = { 0.5f, -0.5f, 0.5f, 0.5f };
-
-    vr::HmdQuaternion_t tmp = QuaternionMultiply(basis, q);
-    return QuaternionMultiply(tmp, basis_conjugate);
-}
-
-static vr::HmdVector3_t ConvertOpenVRToQuakeVector(const vr::HmdVector3_t& v)
-{
-    vr::HmdVector3_t out;
-    out.v[0] = -v.v[2];
-    out.v[1] = -v.v[0];
-    out.v[2] = v.v[1];
-    return out;
-}
-
 // Transforms a HMD Matrix34 to a Quaternion
 // Function logic nicked from https://github.com/Omnifinity/OpenVR-Tracking-Example
 vr::HmdQuaternion_t Matrix34ToQuaternion(vr::HmdMatrix34_t in)
@@ -1226,7 +1188,6 @@ void VR_UpdateScreenContent()
                 ovr_DevicePose[iDevice].mDeviceToAbsoluteTracking);
             vr::HmdQuaternion_t rawControllerQuat = Matrix34ToQuaternion(
                 ovr_DevicePose[iDevice].mDeviceToAbsoluteTracking);
-            vr::HmdQuaternion_t controllerQuat = ConvertOpenVRToQuakeQuaternion(rawControllerQuat);
             vr::HmdVector3_t rawControllerVel =
                 ovr_DevicePose[iDevice].vVelocity;
 
@@ -1264,7 +1225,7 @@ void VR_UpdateScreenContent()
                     meters_to_units;
                 controller->position[2] =
                     (rawControllerPos.v[1]) * meters_to_units;
-                QuatToYawPitchRoll(controllerQuat, controller->orientation);
+                QuatToYawPitchRoll(rawControllerQuat, controller->orientation);
             }
         }
     }
@@ -1279,8 +1240,13 @@ void VR_UpdateScreenContent()
     debug_frame_counter++;
     if (debug_frame_counter % 60 == 0) {
         vr::HmdQuaternion_t q = eyes[1].orientation;
-        Sys_Printf("FORCED VR DEBUG: quat wxyz=(%.3f,%.3f,%.3f,%.3f) orient=(%.2f,%.2f,%.2f) vrYaw=%.2f\n",
-            q.w, q.x, q.y, q.z, orientation[PITCH], orientation[YAW], orientation[ROLL], vrYaw);
+        vr::HmdMatrix44_t pm = ovrHMD->GetProjectionMatrix(eyes[0].eye, 4.f, gl_farclip.value);
+        Sys_Printf("FORCED VR DEBUG: quat wxyz=(%.3f,%.3f,%.3f,%.3f) orient=(%.2f,%.2f,%.2f) vrYaw=%.2f fov=(%.1f,%.1f)/(%.1f,%.1f) tan=(%.2f,%.2f,%.2f,%.2f) target=%.0fx%.0f proj=(%.4f,%.4f,%.4f,%.4f)\n",
+            q.w, q.x, q.y, q.z, orientation[PITCH], orientation[YAW], orientation[ROLL], vrYaw,
+            eyes[0].fov_x, eyes[0].fov_y, eyes[1].fov_x, eyes[1].fov_y,
+            eyes[0].tan_left, eyes[0].tan_right, eyes[0].tan_up, eyes[0].tan_down,
+            eyes[0].fbo.size.width, eyes[0].fbo.size.height,
+            pm.m[0][0], pm.m[0][2], pm.m[1][1], pm.m[1][2]);
     }
     
     if (vr_debug_pose.value)
@@ -1430,7 +1396,7 @@ void VR_UpdateScreenContent()
         // OpenVR: +X=right, +Y=up, +Z=backward
         // Quake:  +X=forward, +Y=left, +Z=up
         temp[0] = -current_eye->position.v[2] * meters_to_units; // Quake X = -OpenVR Z
-        temp[1] = current_eye->position.v[0] * meters_to_units;  // Quake Y = OpenVR X (TEST: removed negation)
+        temp[1] = -current_eye->position.v[0] * meters_to_units;  // Quake Y = -OpenVR X
         temp[2] = current_eye->position.v[1] * meters_to_units;  // Quake Z = +OpenVR Y
 
         float yaw_delta = (r_refdef.viewangles[YAW] - orientation[YAW]);
@@ -1509,6 +1475,52 @@ void VR_GetViewMatrix(float *matrix)
     }
 }
 } // extern "C"
+
+extern "C" qboolean VR_BuildProjectionMatrix(float *matrix, float znear, float zfar)
+{
+	// Builds the per-eye projection matrix in ironwail's matrix convention
+	// (column-major; camera forward=+X, right=+Y, up=+Z; clip.x = -w*y, clip.w = x).
+	// Uses the asymmetric OpenVR projection tangents so each eye's frustum matches
+	// the HMD lens exactly: the symmetric GL_FrustumMatrix crops the outer half of
+	// the eye (culling holes) and stretches the image asymmetrically (fishbowl and
+	// broken stereo), because the real per-eye projection is wider on the outer side.
+	// For symmetric tangents this reduces exactly to GL_FrustumMatrix.
+	extern qboolean gl_clipcontrol_able;
+
+	if (!vr_initialized || !current_eye)
+		return false;
+
+	const float l = -current_eye->tan_left;   // positive left tangent
+	const float r =  current_eye->tan_right;  // positive right tangent
+	const float u = -current_eye->tan_up;     // positive up tangent
+	const float d =  current_eye->tan_down;   // positive down tangent
+
+	memset(matrix, 0, 16 * sizeof(float));
+
+	if (gl_clipcontrol_able)
+	{
+		// reversed-Z projection (matches GL_FrustumMatrix reversed branch)
+		matrix[0*4 + 0] = (l - r) / (l + r);      // horizontal offset (asymmetry)
+		matrix[1*4 + 0] = -2.f / (l + r);         // horizontal scale
+		matrix[0*4 + 1] = (d - u) / (u + d);      // vertical offset (asymmetry)
+		matrix[2*4 + 1] = 2.f / (u + d);          // vertical scale
+		matrix[0*4 + 2] = -znear / (zfar - znear);
+		matrix[0*4 + 3] = 1.f;
+		matrix[3*4 + 2] = zfar * znear / (zfar - znear);
+	}
+	else
+	{
+		// standard projection
+		matrix[0*4 + 0] = (l - r) / (l + r);
+		matrix[1*4 + 0] = -2.f / (l + r);
+		matrix[0*4 + 1] = (d - u) / (u + d);
+		matrix[2*4 + 1] = 2.f / (u + d);
+		matrix[0*4 + 2] = (zfar + znear) / (zfar - znear);
+		matrix[0*4 + 3] = 1.f;
+		matrix[3*4 + 2] = -2.f * zfar * znear / (zfar - znear);
+	}
+	return true;
+}
 
 static qboolean VR_BuildProjectionForEye(const vr_eye_t* eye, float* matrix)
 {
