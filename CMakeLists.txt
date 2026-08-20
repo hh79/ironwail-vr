@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.7)
 include(${CMAKE_CURRENT_SOURCE_DIR}/Misc/cmake/ExtractVersion.cmake)
-project(ironwail VERSION ${IRONWAIL_VERSION} LANGUAGES C CXX)
+project(ironwail-vr VERSION ${IRONWAIL_VERSION} LANGUAGES C CXX)
 
 cmake_policy(SET CMP0072 NEW)   #OpenGL_GL_PREFERENCE to GLVND
 
@@ -69,105 +69,105 @@ elseif (PC_MAD_FOUND)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/snd_mpg123.c)
 endif()
 
-add_executable(ironwail ${IWAIL_SRC} ${VR_SRC})
+add_executable(ironwail-vr ${IWAIL_SRC} ${VR_SRC})
 
 # Set C++ compilation for VR files
 set_source_files_properties(${VR_SRC} PROPERTIES LANGUAGE CXX)
 set_source_files_properties(${VR_SRC} PROPERTIES COMPILE_FLAGS "-std=c++14")
 
 if (UNIX)
-	target_link_libraries(ironwail PRIVATE m)
+	target_link_libraries(ironwail-vr PRIVATE m)
 	set(ENABLE_USERDIRS TRUE CACHE STRING "Enable user directories")
 elseif (WIN32)
-	target_link_libraries(ironwail PRIVATE ws2_32 Winmm)
+	target_link_libraries(ironwail-vr PRIVATE ws2_32 Winmm)
 	if (MINGW)
 		#When the GNU linker is used together with SDL2_Main,
 		#it is very particular about the library ordering
 		#on the link command line
-		target_link_libraries(ironwail PRIVATE mingw32)
+		target_link_libraries(ironwail-vr PRIVATE mingw32)
 		if (SDL2_MAIN_LIBRARY)
-			target_link_libraries(ironwail PRIVATE SDL2::main)
+			target_link_libraries(ironwail-vr PRIVATE SDL2::main)
 		endif()
 	endif()
 endif()
-target_link_libraries(ironwail PRIVATE SDL2::SDL2)
+target_link_libraries(ironwail-vr PRIVATE SDL2::SDL2)
 
 if (CURL_FOUND)
-	target_link_libraries(ironwail PRIVATE CURL::libcurl)
+	target_link_libraries(ironwail-vr PRIVATE CURL::libcurl)
 else()
-	target_compile_definitions(ironwail PRIVATE WITHOUT_CURL)
+	target_compile_definitions(ironwail-vr PRIVATE WITHOUT_CURL)
 endif()
 
 if (OpenGL::OpenGL)
-	target_link_libraries(ironwail PRIVATE OpenGL::OpenGL)
+	target_link_libraries(ironwail-vr PRIVATE OpenGL::OpenGL)
 else()
-	target_link_libraries(ironwail PRIVATE OpenGL::GL)
+	target_link_libraries(ironwail-vr PRIVATE OpenGL::GL)
 endif()
 
-target_compile_definitions(ironwail PRIVATE $<$<CONFIG:Debug>:DEBUG=1> $<$<NOT:$<CONFIG:Debug>>:NDEBUG=1> USE_SDL2 USE_CODEC_WAVE)
+target_compile_definitions(ironwail-vr PRIVATE $<$<CONFIG:Debug>:DEBUG=1> $<$<NOT:$<CONFIG:Debug>>:NDEBUG=1> USE_SDL2 USE_CODEC_WAVE)
 if (MSVC)
-	target_compile_definitions(ironwail PRIVATE _CRT_SECURE_NO_WARNINGS _WIN32)
+	target_compile_definitions(ironwail-vr PRIVATE _CRT_SECURE_NO_WARNINGS _WIN32)
 endif()
 
 if (ENABLE_USERDIRS)
-	target_compile_definitions(ironwail PRIVATE DO_USERDIRS=1)
+	target_compile_definitions(ironwail-vr PRIVATE DO_USERDIRS=1)
 endif()
 
 if (PC_MPG123_FOUND)
-	target_compile_definitions(ironwail PRIVATE USE_CODEC_MP3)
-    target_link_libraries(ironwail PUBLIC PkgConfig::PC_MPG123)
+	target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_MP3)
+    target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_MPG123)
 elseif (PC_MAD_FOUND)
-	target_compile_definitions(ironwail PRIVATE USE_CODEC_MP3)
-	target_link_libraries(ironwail PUBLIC PkgConfig::PC_MAD)
+	target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_MP3)
+	target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_MAD)
 endif()
 
 if (PC_OPUSFILE_FOUND)
-	target_compile_definitions(ironwail PRIVATE USE_CODEC_OPUS)
-    target_link_libraries(ironwail PUBLIC PkgConfig::PC_OPUSFILE)
+	target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_OPUS)
+    target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_OPUSFILE)
 endif()
 
 if (PC_FLAC_FOUND)
-	target_compile_definitions(ironwail PRIVATE USE_CODEC_FLAC)
-    target_link_libraries(ironwail PUBLIC PkgConfig::PC_FLAC)
+	target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_FLAC)
+    target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_FLAC)
 endif()
 
 if (PC_VORBISFILE_FOUND)
-	target_compile_definitions(ironwail PRIVATE USE_CODEC_VORBIS)
-    target_link_libraries(ironwail PUBLIC PkgConfig::PC_VORBISFILE)
+	target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_VORBIS)
+    target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_VORBISFILE)
 elseif (PC_TREMOR_FOUND)
-	target_compile_definitions(ironwail PRIVATE USE_CODEC_VORBIS VORBIS_USE_TREMOR)
-    target_link_libraries(ironwail PUBLIC PkgConfig::PC_TREMOR)
+	target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_VORBIS VORBIS_USE_TREMOR)
+    target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_TREMOR)
 endif()
 
 if (PC_MIKMOD_FOUND)
-	target_compile_definitions(ironwail PRIVATE USE_CODEC_MIKMOD)
-    target_link_libraries(ironwail PUBLIC PkgConfig::PC_MIKMOD)
+	target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_MIKMOD)
+    target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_MIKMOD)
 endif()
 
 if (PC_MODPLUG_FOUND)
-	target_compile_definitions(ironwail PRIVATE USE_CODEC_MODPLUG)
-    target_link_libraries(ironwail PUBLIC PkgConfig::PC_MODPLUG)
+	target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_MODPLUG)
+    target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_MODPLUG)
 endif()
 
 if (PC_XMP_FOUND)
-	target_compile_definitions(ironwail PRIVATE USE_CODEC_XMP)
-    target_link_libraries(ironwail PUBLIC PkgConfig::PC_XMP)
+	target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_XMP)
+    target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_XMP)
 endif()
 
 if (PC_MIKMOD_FOUND OR PC_MODPLUG_FOUND OR PC_XMP_FOUND)
-    target_compile_definitions(ironwail PRIVATE USE_CODEC_UMX)
+    target_compile_definitions(ironwail-vr PRIVATE USE_CODEC_UMX)
 endif()
 
 # OpenVR support
 if (PC_OPENVR_FOUND)
-    target_link_libraries(ironwail PUBLIC PkgConfig::PC_OPENVR)
+    target_link_libraries(ironwail-vr PUBLIC PkgConfig::PC_OPENVR)
 else()
     # Fallback to manual linking if pkg-config doesn't find openvr
     find_library(OPENVR_LIBRARY NAMES openvr_api)
     if (OPENVR_LIBRARY)
-        target_link_libraries(ironwail PUBLIC ${OPENVR_LIBRARY})
+        target_link_libraries(ironwail-vr PUBLIC ${OPENVR_LIBRARY})
         if (UNIX AND NOT APPLE)
-            target_link_libraries(ironwail PUBLIC ${CMAKE_DL_LIBS})
+            target_link_libraries(ironwail-vr PUBLIC ${CMAKE_DL_LIBS})
         endif()
     else()
         message(WARNING "OpenVR library not found. VR support may not work.")
@@ -175,43 +175,43 @@ else()
 endif()
 
 # Link standard C++ library for VR support
-target_link_libraries(ironwail PUBLIC stdc++)
+target_link_libraries(ironwail-vr PUBLIC stdc++)
 
 # Copy ironwail.pak to build directory
-add_custom_command(TARGET ironwail POST_BUILD
+add_custom_command(TARGET ironwail-vr POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different
 		${CMAKE_CURRENT_SOURCE_DIR}/Quake/ironwail.pak
-		$<TARGET_FILE_DIR:ironwail>/id1/ironwail.pak
+		$<TARGET_FILE_DIR:ironwail-vr>/id1/ironwail.pak
 	COMMENT "Copying ironwail.pak to build directory")
 
 if (WIN32)
 	#Copy DLL dependencies to output folder
-	add_custom_command(TARGET ironwail POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:ironwail> $<TARGET_FILE_DIR:ironwail>
+	add_custom_command(TARGET ironwail-vr POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:ironwail-vr> $<TARGET_FILE_DIR:ironwail-vr>
 		COMMAND_EXPAND_LISTS)
 
 	#VORBISFILE and OPUSFILE both use the libogg-0.dll
 	if (OGG_DLL AND (PC_VORBISFILE_FOUND OR PC_OPUSFILE_FOUND))
-		add_custom_command(TARGET ironwail POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OGG_DLL} $<TARGET_FILE_DIR:ironwail>
+		add_custom_command(TARGET ironwail-vr POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OGG_DLL} $<TARGET_FILE_DIR:ironwail-vr>
 			COMMAND_EXPAND_LISTS)
 	endif()
 	#libvorbisfile depends on libvorbis-0.dll
 	if (PC_VORBISFILE_FOUND AND VORBIS_DLL)
-		add_custom_command(TARGET ironwail POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VORBIS_DLL} $<TARGET_FILE_DIR:ironwail>
+		add_custom_command(TARGET ironwail-vr POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VORBIS_DLL} $<TARGET_FILE_DIR:ironwail-vr>
 			COMMAND_EXPAND_LISTS)
 	endif()
 	#libopusfile depends on libopus-0.dll
 	if (PC_OPUSFILE_FOUND AND OPUS_DLL)
-		add_custom_command(TARGET ironwail POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPUS_DLL} $<TARGET_FILE_DIR:ironwail>
+		add_custom_command(TARGET ironwail-vr POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPUS_DLL} $<TARGET_FILE_DIR:ironwail-vr>
 			COMMAND_EXPAND_LISTS)
 	endif()
 	#CURL wants zlib1.dll
 	if (CURL_FOUND AND ZLIB1_DLL)
-		add_custom_command(TARGET ironwail POST_BUILD
-				COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ZLIB1_DLL} $<TARGET_FILE_DIR:ironwail>
+		add_custom_command(TARGET ironwail-vr POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ZLIB1_DLL} $<TARGET_FILE_DIR:ironwail-vr>
 				COMMAND_EXPAND_LISTS)
 	endif()
 endif()

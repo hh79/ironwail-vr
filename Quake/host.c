@@ -281,7 +281,7 @@ void Host_Version_f (void)
 	Con_Printf ("\n");
 	Con_Printf ("Quake      %1.2f\n", VERSION);
 	Con_Printf ("QuakeSpasm " QUAKESPASM_VER_STRING "\n");
-	Con_Printf ("Ironwail   " IRONWAIL_VER_STRING "\n");
+	Con_Printf ("IronwailVR " IRONWAIL_VER_STRING "\n");
 	Con_Printf ("Exe        " __TIME__ " " __DATE__ "\n");
 	Con_Printf ("SDL        " Q_SDL_COMPILED_VERSION_STRING " (compiled)\n");
 	Con_Printf ("           %d.%d.%d (linked)\n", sdl_linked.major, sdl_linked.minor, sdl_linked.patch);
@@ -1142,7 +1142,7 @@ static void CL_LoadCSProgs (void)
 			if (qcvm->extfuncs.CSQC_Init)
 			{
 				G_FLOAT (OFS_PARM0) = false;
-				G_INT (OFS_PARM1) = PR_SetEngineString ("Ironwail");
+				G_INT (OFS_PARM1) = PR_SetEngineString ("IronwailVR");
 				G_FLOAT (OFS_PARM2) = 10000 * IRONWAIL_VER_MAJOR + 100 * IRONWAIL_VER_MINOR + IRONWAIL_VER_PATCH;
 				PR_ExecuteProgram (qcvm->extfuncs.CSQC_Init);
 			}
