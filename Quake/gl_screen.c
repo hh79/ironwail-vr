@@ -143,6 +143,8 @@ qboolean	scr_disabled_for_loading;
 qboolean	scr_drawloading;
 float		scr_disabled_time;
 
+static qboolean	scr_inupdate;	// set while SCR_UpdateScreen is on-going (reentrancy guard)
+
 int	scr_tileclear_updates = 0; //johnfitz
 
 hudstyle_t	hudstyle;
@@ -2117,6 +2119,17 @@ void SCR_UpdateScreen (void)
 {
 	vid.numpages = (gl_triplebuffer.value) ? 3 : 2;
 
+	// Reentrancy guard: Con_Printf calls SCR_UpdateScreen while the console is
+	// up (see Con_Printf). If that happens in the middle of an on-going frame
+	// (e.g. a Con_Printf from Draw_Flush), the nested call must not run another
+	// full GL_BeginRendering/GL_EndRendering cycle: GL_ReleaseFrameResources
+	// advances frameres_idx mid-frame, so the outer frame's acquire/release end
+	// up on different slots and GL_ReleaseFrameResources trips the
+	// '!frame->fence' assertion. The message was already added to the console
+	// buffer and gets drawn by the current frame (or the next one).
+	if (scr_inupdate)
+		return;
+
 	if (scr_disabled_for_loading)
 	{
 		if (realtime - scr_disabled_time > 60)
@@ -2131,6 +2144,7 @@ void SCR_UpdateScreen (void)
 	if (!scr_initialized || !con_initialized)
 		return;				// not initialized yet
 
+	scr_inupdate = true;
 
 	GL_BeginRendering (&glx, &gly, &glwidth, &glheight);
 

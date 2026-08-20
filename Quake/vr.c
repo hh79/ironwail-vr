@@ -1120,11 +1120,16 @@ static void RenderScreenForCurrentEye_OVR()
 
 void VR_HandleGammaCorrect()
 {
-    // Bind the final per-eye target: the composite FBO when the scene was
-    // underwater-warped, otherwise the eye's own framebuffer.
-    GLuint target = vr_submit_fbo ? vr_submit_fbo :
-        (current_eye ? current_eye->fbo.framebuffer : eyes[0].fbo.framebuffer);
-    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, target);
+    // Redirect the postprocess pass to the per-eye target only when it runs
+    // from the VR render path, which sets vr_submit_fbo (the composite FBO
+    // when the scene was underwater-warped, otherwise the eye's own FBO).
+    // On the desktop path (console forced up / VR off) vr_submit_fbo is 0:
+    // leave FBO 0 bound — the VR eye FBOs (and possibly the EXT functions)
+    // don't exist yet, and current_eye isn't reset between frames, so it
+    // can't be used to detect the VR path.
+    if (!vr_submit_fbo)
+        return;
+    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, vr_submit_fbo);
     glReadBuffer(GL_FRONT);
 }
 
