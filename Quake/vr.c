@@ -1812,8 +1812,13 @@ void VR_Draw2D()
 
     VectorMA(r_refdef.vieworg, 48, forward, target);
 
+    // The HUD/status bar is drawn through this same billboard. It must be
+    // locked to the eye: any lag here (quakespasm-openvr eases only the menu,
+    // at 0.2, and pins the sbar at 1.0) makes the HUD drift relative to the
+    // player whenever vieworg moves (room-scale movement), which is perceived
+    // as the HUD sliding toward/away from the player. Track target exactly.
     vec3_t smoothedTarget;
-    vec3lerp(smoothedTarget, lastMenuPosition, target, 0.2);
+    vec3lerp(smoothedTarget, lastMenuPosition, target, 1.0);
     VectorCopy(smoothedTarget, lastMenuPosition);
 
     // Build the 2D billboard matrix: NDC quad -> 3D billboard in front of the
