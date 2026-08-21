@@ -543,10 +543,11 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	if (!totalinst)
 		return;
 
-	// FORCED DEBUG: show whether water entities are collected per pass
+	// Debug: show whether water entities are collected per pass (gated by vr_debug_pose)
 	{
+		extern cvar_t vr_debug_pose;
 		static int water_debug_counter = 0;
-		if (++water_debug_counter % 60 == 0)
+		if (vr_debug_pose.value && ++water_debug_counter % 60 == 0)
 			Con_Printf ("WATER DEBUG: %s pass, ents=%d inst=%d oit=%d\n",
 				translucent ? "translucent" : "opaque", count, totalinst,
 				(int)(translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT));

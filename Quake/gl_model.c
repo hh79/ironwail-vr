@@ -3429,13 +3429,15 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	VectorCopy(pheader->scale, pheader->original_scale);
 	VectorCopy(pheader->scale_origin, pheader->original_scale_origin);
 
-	// FORCED DEBUG: confirm the model's scale/original_scale at load time
+	// Debug: confirm the model's scale/original_scale at load time (gated by vr_debug_pose)
 	{
-		Con_Printf ("ALIASLOAD DEBUG: %s scale=(%.3f,%.3f,%.3f) origScale=(%.3f,%.3f,%.3f) pheader=%p\n",
-			mod->name,
-			pheader->scale[0], pheader->scale[1], pheader->scale[2],
-			pheader->original_scale[0], pheader->original_scale[1], pheader->original_scale[2],
-			(void*)pheader);
+		extern cvar_t vr_debug_pose;
+		if (vr_debug_pose.value)
+			Con_Printf ("ALIASLOAD DEBUG: %s scale=(%.3f,%.3f,%.3f) origScale=(%.3f,%.3f,%.3f) pheader=%p\n",
+				mod->name,
+				pheader->scale[0], pheader->scale[1], pheader->scale[2],
+				pheader->original_scale[0], pheader->original_scale[1], pheader->original_scale[2],
+				(void*)pheader);
 	}
 
 //
@@ -4307,8 +4309,12 @@ static qboolean Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 	aliashdr_t			*outhdr = NULL, *surf;
 	size_t				hdrsize;
 
-	// FORCED DEBUG: which models load through the MD5 (r_md5 "Remastered") path
-	Con_Printf ("MD5LOAD DEBUG: %s\n", fname);
+	// Debug: which models load through the MD5 (r_md5 "Remastered") path (gated by vr_debug_pose)
+	{
+		extern cvar_t vr_debug_pose;
+		if (vr_debug_pose.value)
+			Con_Printf ("MD5LOAD DEBUG: %s\n", fname);
+	}
 
 	bonepose_t			*outposes = NULL;
 	boneinfo_t			*outbones;

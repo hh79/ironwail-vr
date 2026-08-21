@@ -24,9 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "vr.h"
 
-extern qboolean VR_GetProjectionMatrix(float *matrix);
-extern void VR_GetViewMatrix(float *matrix);
-
 qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
@@ -352,7 +349,9 @@ void GL_PostProcess (void)
 	variant = q_min ((int)softemu, 2);
 	GL_UseProgram (glprogs.postprocess[variant]);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
+	// In VR the scene lives in the eye/composite texture, not the desktop
+	// composite FBO; vr_postprocess_tex is set by the VR path to the eye image.
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, vr_postprocess_tex ? vr_postprocess_tex : framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
@@ -886,14 +885,6 @@ void R_SetFrustum (void)
 	TranslationMatrix(translation, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
 	MatrixMultiply(r_matview, translation);
 
-	// Apply VR eye offset for stereo rendering
-	if (vr_enabled.value)
-	{
-		float vr_eye_matrix[16];
-		VR_GetViewMatrix(vr_eye_matrix);
-		MatrixMultiply(r_matview, vr_eye_matrix);
-	}
-
 	// View projection matrix
 	memcpy(r_matviewproj, r_matproj, 16 * sizeof(float));
 	MatrixMultiply(r_matviewproj, r_matview);
@@ -1208,10 +1199,11 @@ void R_DrawViewModel (void)
 {
 	entity_t *e = &cl.viewent;
 
-	// FORCED DEBUG: weapon state (rate-limited)
+	// Debug: weapon state (gated by vr_debug_pose)
 	{
+		extern cvar_t vr_debug_pose;
 		static int viewmodel_state_counter = 0;
-		if (++viewmodel_state_counter % 60 == 0)
+		if (vr_debug_pose.value && ++viewmodel_state_counter % 60 == 0)
 			Con_Printf ("VIEWMODEL DEBUG: model=%p type=%d org=(%.1f,%.1f,%.1f) ang=(%.1f,%.1f,%.1f) visible=%d drawvm=%d drawent=%d chase=%d viewsize=%g\n",
 				(void*)e->model, e->model ? (int)e->model->type : -1,
 				e->origin[0], e->origin[1], e->origin[2],

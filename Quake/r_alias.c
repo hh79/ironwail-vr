@@ -425,11 +425,11 @@ void R_FlushAliasInstances (qboolean showtris)
 		if (r_lightmap_cheatsafe) { textures[0] = greytexture; textures[1] = blacktexture; }
 		if (!textures[1]) textures[1] = blacktexture;
 
-		// FORCED DEBUG: weapon instance draw state (rate-limited)
-		if (ibuf.ent == &cl.viewent)
+		// Debug: weapon instance draw state (gated by vr_debug_pose)
 		{
+			extern cvar_t vr_debug_pose;
 			static int weapon_draw_debug_counter = 0;
-			if (++weapon_draw_debug_counter % 60 == 0)
+			if (vr_debug_pose.value && ibuf.ent == &cl.viewent && ++weapon_draw_debug_counter % 60 == 0)
 				Con_Printf ("VIEWMODEL DRAW: model=%s skin=%p fb=%p pose1=%d pose2=%d alpha=%g inst=%d\n",
 					model->name, (void*)textures[0], (void*)textures[1],
 					ibuf.inst[0].pose1, ibuf.inst[0].pose2,
@@ -622,8 +622,10 @@ static void R_DrawAliasModel_Real (entity_t *e, aliasmode_t mode)
 	{
 		if (e == &cl.viewent)
 		{
+			// Debug: weapon kept even though it would be culled (gated by vr_debug_pose)
+			extern cvar_t vr_debug_pose;
 			static int viewmodel_cull_counter = 0;
-			if (++viewmodel_cull_counter % 60 == 0)
+			if (vr_debug_pose.value && ++viewmodel_cull_counter % 60 == 0)
 				Con_Printf ("VIEWMODEL DEBUG: weapon would be culled; drawing anyway\n");
 		}
 		else

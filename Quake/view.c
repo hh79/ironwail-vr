@@ -853,13 +853,14 @@ void V_CalcRefdef (void)
 	if (vr_enabled.value)
 	{
 		extern vec3_t vr_viewOffset;
+		extern cvar_t vr_debug_pose;
 		_VectorAdd(ent->origin, vr_viewOffset, r_refdef.vieworg);
 		
-		// Debug: Print vieworg per eye
+		// Debug: print vieworg per eye (gated by vr_debug_pose)
 		static int eye_count = 0;
 		static double last_vieworg_debug = 0;
 		double current_time = Sys_DoubleTime();
-		if (current_time - last_vieworg_debug >= 2.0) {
+		if (vr_debug_pose.value && current_time - last_vieworg_debug >= 2.0) {
 			Sys_Printf("V_CalcRefdef eye %d: vieworg=(%.2f, %.2f, %.2f) offset=(%.2f, %.2f, %.2f)\n",
 				eye_count % 2, 
 				r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2],

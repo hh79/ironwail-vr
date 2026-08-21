@@ -43,15 +43,12 @@ void VR_ShowCrosshair();
 void VR_Draw2D();
 void VR_Move(usercmd_t *cmd);
 void VR_InitGame();
-qboolean VR_GetProjectionMatrix(float *matrix); // Get VR projection matrix for current eye
 qboolean VR_BuildProjectionMatrix(float *matrix, float znear, float zfar); // Build asymmetric per-eye projection in ironwail matrix convention
-void VR_GetViewMatrix(float *matrix); // Get VR view offset for current eye
 void VR_PushYaw();
 void VR_DrawSbar();
 void VR_AddOrientationToViewAngles(vec3_t angles);
 void VR_SetAngles(vec3_t angles);
 void VR_ResetOrientation();
-void VR_SetMatrices();
 void VR_HandleGammaCorrect();
 void InitAllWeaponCVars();
 
@@ -69,6 +66,11 @@ extern cvar_t vr_floor_offset;
 extern cvar_t vr_projectilespawn_z_offset;
 extern cvar_t vr_hud_scale;
 extern cvar_t vr_menu_scale;
+extern cvar_t vr_debug_pose;
+
+// Source texture for the gamma/postprocess pass; 0 = desktop composite.
+// Set by the VR path so GL_PostProcess samples the eye image in VR.
+extern GLuint vr_postprocess_tex;
 
 #define MAX_WEAPONS 25 //not sure what this number should actually be...
 #define VARS_PER_WEAPON 5

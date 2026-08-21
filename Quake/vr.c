@@ -189,7 +189,6 @@ static float vrYaw;
 static bool readbackYaw;
 
 vec3_t vr_viewOffset;
-vec3_t lastHudPosition{ 0.0, 0.0, 0.0 };
 vec3_t lastMenuPosition{ 0.0, 0.0, 0.0 };
 
 vr::IVRSystem *ovrHMD;
@@ -204,6 +203,19 @@ static vr_eye_t *current_eye = NULL;
 static fbo_t composite_fbo = {0};
 static qboolean composite_fbo_valid = false;
 static GLuint vr_submit_fbo = 0; // final per-eye target for gamma correction
+
+// Scratch FBO that receives the gamma/postprocess pass when one is needed.
+// The postprocess shader samples a texture while rendering into an FBO; using
+// a separate target avoids reading and writing the same texture (feedback).
+static fbo_t gamma_fbo = {0};
+static qboolean gamma_fbo_valid = false;
+
+// Source texture for the postprocess pass (0 = desktop composite). Set by the
+// VR path so GL_PostProcess samples the eye image instead of the desktop
+// composite FBO, which holds stale desktop content in VR.
+extern "C" {
+GLuint vr_postprocess_tex = 0;
+}
 static vr_controller controllers[2];
 static vec3_t lastOrientation = { 0, 0, 0 };
 static vec3_t lastAim = { 0, 0, 0 };
@@ -261,7 +273,7 @@ DEFINE_CVAR(vr_joystick_axis_exponent, 1.0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_joystick_deadzone_trunc, 1, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_hud_scale, 0.025, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_menu_scale, 0.13, CVAR_ARCHIVE);
-DEFINE_CVAR(vr_debug_pose, 1, CVAR_NONE);
+DEFINE_CVAR(vr_debug_pose, 0, CVAR_NONE);
 
 static qboolean InitOpenGLExtensions()
 {
@@ -383,6 +395,20 @@ static void VR_EnsureCompositeFBO(int width, int height)
     }
 }
 
+static void VR_EnsureGammaFBO(int width, int height)
+{
+    if (!gamma_fbo_valid)
+    {
+        gamma_fbo = CreateFBO(width, height);
+        gamma_fbo_valid = true;
+    }
+    else if ((int)gamma_fbo.size.width != width ||
+             (int)gamma_fbo.size.height != height)
+    {
+        RecreateTextures(&gamma_fbo, width, height);
+    }
+}
+
 void DeleteFBO(fbo_t fbo) {
     glDeleteFramebuffersEXT(1, &fbo.framebuffer);
     glDeleteTextures(1, &fbo.depth_texture);
@@ -404,16 +430,6 @@ void Vec3RotateZ(vec3_t in, float angle, vec3_t out) {
     out[0] = in[0] * cos(angle) - in[1] * sin(angle);
     out[1] = in[0] * sin(angle) + in[1] * cos(angle);
     out[2] = in[2];
-}
-
-vr::HmdMatrix44_t TransposeMatrix(vr::HmdMatrix44_t in) {
-    vr::HmdMatrix44_t out;
-    int y, x;
-    for (y = 0; y < 4; y++)
-        for (x = 0; x < 4; x++)
-            out.m[x][y] = in.m[y][x];
-
-    return out;
 }
 
 vr::HmdVector3_t AddVectors(vr::HmdVector3_t a, vr::HmdVector3_t b)
@@ -506,22 +522,26 @@ void HmdVec3RotateY(vr::HmdVector3_t* pos, float angle)
 
 static void VR_Enabled_f(cvar_t *var)
 {
-    Sys_Printf("VR_Enabled_f callback triggered, vr_enabled.value = %f\n", vr_enabled.value);
+    if (vr_debug_pose.value)
+        Sys_Printf("VR_Enabled_f callback triggered, vr_enabled.value = %f\n", vr_enabled.value);
     VID_VR_Disable();
 
     if (!vr_enabled.value)
     {
-        Sys_Printf("vr_enabled is 0, VR disabled\n");
+        if (vr_debug_pose.value)
+            Sys_Printf("vr_enabled is 0, VR disabled\n");
         return;
     }
 
-    Sys_Printf("Attempting to enable VR...\n");
+    if (vr_debug_pose.value)
+        Sys_Printf("Attempting to enable VR...\n");
     if (!VR_Enable())
     {
-        Sys_Printf("VR_Enable() failed, setting vr_enabled to 0\n");
+        if (vr_debug_pose.value)
+            Sys_Printf("VR_Enable() failed, setting vr_enabled to 0\n");
         Cvar_SetValueQuick(&vr_enabled, 0);
     }
-    else
+    else if (vr_debug_pose.value)
     {
         Sys_Printf("VR enabled successfully!\n");
     }
@@ -562,7 +582,8 @@ void Mod_Weapon(const char* name, aliashdr_t* hdr)
         }
         if (weaponCVarEntry == -1)
         {
-            Con_Printf("No VR offset for weapon: %s\n", name);
+            if (vr_debug_pose.value)
+                Con_Printf("No VR offset for weapon: %s\n", name);
         }
     }
 
@@ -593,10 +614,10 @@ void Mod_Weapon(const char* name, aliashdr_t* hdr)
         VectorAdd(hdr->original_scale_origin, ofs, hdr->scale_origin);
         VectorScale(hdr->scale_origin, scaleCorrect, hdr->scale_origin);
 
-        // FORCED DEBUG: confirm the per-weapon VR scale/offset is applied
+        // Debug: confirm the per-weapon VR scale/offset is applied (gated by vr_debug_pose)
         {
             static int mod_weapon_debug_counter = 0;
-            if (++mod_weapon_debug_counter % 120 == 0)
+            if (vr_debug_pose.value && ++mod_weapon_debug_counter % 120 == 0)
                 Con_Printf("MODWEAPON DEBUG: %s entry=%d hdr=%p origScale=(%.2f,%.2f,%.2f) scale=(%.2f,%.2f,%.2f) origin=(%.2f,%.2f,%.2f) ofs=(%.1f,%.1f,%.1f)\n",
                     name, weaponCVarEntry, (void*)hdr,
                     hdr->original_scale[0], hdr->original_scale[1], hdr->original_scale[2],
@@ -896,6 +917,9 @@ void VID_VR_Init()
     // Sickness stuff
     Cvar_RegisterVariable(&vr_viewkick);
 
+    // Debug pose/view dump toggle (console only; deliberately not in the VR menu)
+    Cvar_RegisterVariable(&vr_debug_pose);
+
     VR_Menu_Init();
 
     // Set the cvar if invoked from a command line parameter
@@ -914,23 +938,28 @@ void VR_InitGame()
 
 qboolean VR_Enable()
 {
-    Sys_Printf("VR_Enable() called\n");
+    if (vr_debug_pose.value)
+        Sys_Printf("VR_Enable() called\n");
     if(vr_initialized)
     {
-        Sys_Printf("VR already initialized, returning true\n");
+        if (vr_debug_pose.value)
+            Sys_Printf("VR already initialized, returning true\n");
         return true;
     }
     vr::EVRInitError eInit = vr::VRInitError_None;
-    Sys_Printf("Calling vr::VR_Init()...\n");
+    if (vr_debug_pose.value)
+        Sys_Printf("Calling vr::VR_Init()...\n");
     ovrHMD = vr::VR_Init(&eInit, vr::VRApplication_Scene);
 
     if(eInit != vr::VRInitError_None)
     {
-        Sys_Printf("ERROR %d: %s\nFailed to Initialize Steam VR\n", eInit,
-            VR_GetVRInitErrorAsEnglishDescription(eInit));
+        if (vr_debug_pose.value)
+            Sys_Printf("ERROR %d: %s\nFailed to Initialize Steam VR\n", eInit,
+                VR_GetVRInitErrorAsEnglishDescription(eInit));
         return false;
     }
-    Sys_Printf("VR_Init succeeded! HMD connected.\n");
+    if (vr_debug_pose.value)
+        Sys_Printf("VR_Init succeeded! HMD connected.\n");
 
     if(!InitOpenGLExtensions())
     {
@@ -966,8 +995,9 @@ qboolean VR_Enable()
     eyes[i].tan_right = RightTan;
     eyes[i].tan_up = UpTan;
     eyes[i].tan_down = DownTan;
-        Sys_Printf("Eye %d: FOV X=%.2f Y=%.2f, RenderTarget=%dx%d\n", 
-            i, eyes[i].fov_x, eyes[i].fov_y, vrwidth, vrheight);
+        if (vr_debug_pose.value)
+            Sys_Printf("Eye %d: FOV X=%.2f Y=%.2f, RenderTarget=%dx%d\n",
+                i, eyes[i].fov_x, eyes[i].fov_y, vrwidth, vrheight);
     }
 
     vr::VRCompositor()->SetTrackingSpace(vr::TrackingUniverseStanding);
@@ -1001,14 +1031,17 @@ void VID_VR_Shutdown()
 
 void VID_VR_Disable()
 {
-    Sys_Printf("VID_VR_Disable() called, vr_initialized = %d\n", vr_initialized);
+    if (vr_debug_pose.value)
+        Sys_Printf("VID_VR_Disable() called, vr_initialized = %d\n", vr_initialized);
     if(!vr_initialized)
     {
-        Sys_Printf("VR not initialized, returning\n");
+        if (vr_debug_pose.value)
+            Sys_Printf("VR not initialized, returning\n");
         return;
     }
 
-    Sys_Printf("Calling vr::VR_Shutdown()\n");
+    if (vr_debug_pose.value)
+        Sys_Printf("Calling vr::VR_Shutdown()\n");
     vr::VR_Shutdown();
     ovrHMD = NULL;
 
@@ -1018,7 +1051,8 @@ void VID_VR_Disable()
     // TODO: Cleanup frame buffers
 
     vr_initialized = false;
-    Sys_Printf("VR disabled\n");
+    if (vr_debug_pose.value)
+        Sys_Printf("VR disabled\n");
 }
 
 static void RenderScreenForCurrentEye_OVR()
@@ -1037,7 +1071,8 @@ static void RenderScreenForCurrentEye_OVR()
                        glheight != current_eye->fbo.size.height;
     if(newTextures)
     {
-        Sys_Printf("Creating new textures %dx%d for eye %d\n", glwidth, glheight, current_eye->index);
+        if (vr_debug_pose.value)
+            Sys_Printf("Creating new textures %dx%d for eye %d\n", glwidth, glheight, current_eye->index);
         RecreateTextures(&current_eye->fbo, glwidth, glheight);
     }
 
@@ -1101,13 +1136,26 @@ static void RenderScreenForCurrentEye_OVR()
 
     VR_Draw2D();
 
+    // Run the gamma/postprocess pass into a scratch FBO when one is needed, so
+    // the postprocess shader never reads and writes the same texture (feedback);
+    // the scratch image is what gets submitted to the compositor. The source is
+    // the eye image (vr_postprocess_tex), never the desktop composite FBO.
+    GLuint submit_tex = final_tex;
     vr_submit_fbo = final_fbo;
+    if (GL_NeedsPostprocess ())
+    {
+        VR_EnsureGammaFBO((int)glwidth, (int)glheight);
+        vr_submit_fbo = gamma_fbo.framebuffer;
+        submit_tex = gamma_fbo.texture;
+        vr_postprocess_tex = final_tex;
+    }
     GLSLGamma_GammaCorrect();
     vr_submit_fbo = 0;
+    vr_postprocess_tex = 0;
 
     // Generate the eye texture and send it to the HMD
     vr::Texture_t eyeTexture = {
-        reinterpret_cast<void*>(uintptr_t(final_tex)),
+        reinterpret_cast<void*>(uintptr_t(submit_tex)),
         vr::TextureType_OpenGL, vr::ColorSpace_Gamma };
     vr::VRCompositor()->Submit(current_eye->eye, &eyeTexture);
 
@@ -1184,9 +1232,11 @@ void VR_UpdateScreenContent()
             vr::HmdVector3_t headPos =
                 Matrix34ToVector(ovr_DevicePose->mDeviceToAbsoluteTracking);
             vec3_t currentHeadOrigin;
+            vec3_t headOriginQuake;
             currentHeadOrigin[0] = headPos.v[2];
             currentHeadOrigin[1] = headPos.v[0];
             currentHeadOrigin[2] = headPos.v[1];
+            VectorCopy(currentHeadOrigin, headOriginQuake);
 
             vec3_t moveInTracking;
             _VectorSubtract(currentHeadOrigin, lastHeadOrigin, moveInTracking);
@@ -1240,7 +1290,7 @@ void VR_UpdateScreenContent()
                     vec3_t headAngles;
                     QuatToYawPitchRoll(headQuatOpenVR, headAngles);
                     Sys_Printf("[VR DEBUG] Head origin=(%.3f, %.3f, %.3f) yaw/pitch/roll=(%.2f, %.2f, %.2f) vrYaw=%.2f\n",
-                        currentHeadOrigin[0], currentHeadOrigin[1], currentHeadOrigin[2],
+                        headOriginQuake[0], headOriginQuake[1], headOriginQuake[2],
                         headAngles[YAW], headAngles[PITCH], headAngles[ROLL], vrYaw);
                     Sys_Printf("[VR DEBUG] EyeL OVR=(%.3f, %.3f, %.3f) → Quake=(%.3f, %.3f, %.3f)\n",
                         leyePos.v[0], leyePos.v[1], leyePos.v[2],
@@ -1308,22 +1358,25 @@ void VR_UpdateScreenContent()
 
     QuatToYawPitchRoll(eyes[1].orientation, orientation);
     
-    // FORCED DEBUG: print every 60 frames
-    static int debug_frame_counter = 0;
-    debug_frame_counter++;
-    if (debug_frame_counter % 60 == 0) {
-        vr::HmdQuaternion_t q = eyes[1].orientation;
-        vr::HmdMatrix44_t pm = ovrHMD->GetProjectionMatrix(eyes[0].eye, 4.f, gl_farclip.value);
-        float dl = (1.f - pm.m[0][2]) / pm.m[0][0];
-        float dr = (1.f + pm.m[0][2]) / pm.m[0][0];
-        float du = (1.f + pm.m[1][2]) / pm.m[1][1];
-        float dd = (1.f - pm.m[1][2]) / pm.m[1][1];
-        Sys_Printf("FORCED VR DEBUG: quat wxyz=(%.3f,%.3f,%.3f,%.3f) orient=(%.2f,%.2f,%.2f) vrYaw=%.2f fov=(%.1f,%.1f)/(%.1f,%.1f) projTan=(%.2f,%.2f,%.2f,%.2f) target=%.0fx%.0f proj=(%.4f,%.4f,%.4f,%.4f)\n",
-            q.w, q.x, q.y, q.z, orientation[PITCH], orientation[YAW], orientation[ROLL], vrYaw,
-            eyes[0].fov_x, eyes[0].fov_y, eyes[1].fov_x, eyes[1].fov_y,
-            dl, dr, du, dd,
-            eyes[0].fbo.size.width, eyes[0].fbo.size.height,
-            pm.m[0][0], pm.m[0][2], pm.m[1][1], pm.m[1][2]);
+    // Debug: projection/orientation state, every 60 frames (gated by vr_debug_pose)
+    if (vr_debug_pose.value)
+    {
+        static int debug_frame_counter = 0;
+        debug_frame_counter++;
+        if (debug_frame_counter % 60 == 0) {
+            vr::HmdQuaternion_t q = eyes[1].orientation;
+            vr::HmdMatrix44_t pm = ovrHMD->GetProjectionMatrix(eyes[0].eye, 4.f, gl_farclip.value);
+            float dl = (1.f - pm.m[0][2]) / pm.m[0][0];
+            float dr = (1.f + pm.m[0][2]) / pm.m[0][0];
+            float du = (1.f + pm.m[1][2]) / pm.m[1][1];
+            float dd = (1.f - pm.m[1][2]) / pm.m[1][1];
+            Sys_Printf("[VR DEBUG] proj quat wxyz=(%.3f,%.3f,%.3f,%.3f) orient=(%.2f,%.2f,%.2f) vrYaw=%.2f fov=(%.1f,%.1f)/(%.1f,%.1f) projTan=(%.2f,%.2f,%.2f,%.2f) target=%.0fx%.0f proj=(%.4f,%.4f,%.4f,%.4f)\n",
+                q.w, q.x, q.y, q.z, orientation[PITCH], orientation[YAW], orientation[ROLL], vrYaw,
+                eyes[0].fov_x, eyes[0].fov_y, eyes[1].fov_x, eyes[1].fov_y,
+                dl, dr, du, dd,
+                eyes[0].fbo.size.width, eyes[0].fbo.size.height,
+                pm.m[0][0], pm.m[0][2], pm.m[1][1], pm.m[1][2]);
+        }
     }
     
     if (vr_debug_pose.value)
@@ -1508,51 +1561,6 @@ void VR_UpdateScreenContent()
 
 
 
-void VR_SetMatrices()
-{
-    vr::HmdMatrix44_t projection;
-
-    // Calculate HMD projection matrix and view offset position
-    projection = TransposeMatrix(
-        ovrHMD->GetProjectionMatrix(current_eye->eye, 4.f, gl_farclip.value));
-
-    // Set OpenGL projection matrix
-    // Ironwail will use this via glGet when needed
-    glMatrixMode(GL_PROJECTION);
-    glLoadMatrixf((GLfloat*)projection.m);
-    
-    // Also update model-view matrix mode for ironwail
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-}
-
-extern "C" {
-// Get VR eye offset to apply to view matrix
-// NOTE: The eye offset is already applied via vr_viewOffset in view.c (V_CalcRefdef)
-// which adds vr_viewOffset to r_refdef.vieworg. This function returns identity
-// because the offset is already incorporated into the view translation matrix
-// through r_refdef.vieworg in R_SetFrustum().
-void VR_GetViewMatrix(float *matrix)
-{
-    // Return identity matrix - eye offset already applied via vr_viewOffset
-    memset(matrix, 0, 16 * sizeof(float));
-    matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1.0f;
-    
-    if (vr_debug_pose.value && vr_initialized && current_eye)
-    {
-        static double last_viewmatrix_debug = 0;
-        double debug_now = Sys_DoubleTime();
-        if (debug_now - last_viewmatrix_debug >= 0.5)
-        {
-            int eye_index = current_eye ? current_eye->index : -1;
-            Sys_Printf("[VR DEBUG] VR_GetViewMatrix eye=%d returning identity (offset via vr_viewOffset=%.2f,%.2f,%.2f)\n",
-                eye_index, vr_viewOffset[0], vr_viewOffset[1], vr_viewOffset[2]);
-            last_viewmatrix_debug = debug_now;
-        }
-    }
-}
-} // extern "C"
-
 extern "C" qboolean VR_BuildProjectionMatrix(float *matrix, float znear, float zfar)
 {
 	// Builds the per-eye projection matrix in ironwail's matrix convention
@@ -1603,27 +1611,6 @@ extern "C" qboolean VR_BuildProjectionMatrix(float *matrix, float znear, float z
 	}
 	return true;
 }
-
-static qboolean VR_BuildProjectionForEye(const vr_eye_t* eye, float* matrix)
-{
-    if (!ovrHMD || !eye)
-        return false;
-
-    vr::HmdMatrix44_t projection = TransposeMatrix(
-        ovrHMD->GetProjectionMatrix(eye->eye, 4.f, gl_farclip.value));
-
-    memcpy(matrix, projection.m, 16 * sizeof(float));
-    return true;
-}
-
-extern "C" qboolean VR_GetProjectionMatrix(float* matrix)
-{
-    if (!vr_initialized || !current_eye)
-        return false;
-
-    return VR_BuildProjectionForEye(current_eye, matrix);
-}
-
 
 void VR_AddOrientationToViewAngles(vec3_t angles)
 {
@@ -1798,7 +1785,6 @@ void VR_Draw2D()
     vid.conheight = 200;
 
     // draw 2d elements 1m from the users face, centered
-    glPushMatrix();
     glDisable(GL_DEPTH_TEST); // prevents drawing sprites on sprites from interferring with one another
     glEnable(GL_BLEND);
 
@@ -1854,16 +1840,6 @@ void VR_Draw2D()
         }
         vr_gui_matrix_valid = true;
     }
-
-    glTranslatef(smoothedTarget[0], smoothedTarget[1], smoothedTarget[2]);
-
-    glRotatef(menu_angles[YAW] - 90, 0, 0, 1); // rotate around z
-    glRotatef(90 + menu_angles[PITCH], -1, 0,
-        0); // keep bar at constant angled pitch towards user
-    glTranslatef(-(320.0 * scale_hud / 2), -(200.0 * scale_hud / 2),
-        0); // center the status bar
-    glScalef(scale_hud, scale_hud, scale_hud);
-
 
     if(scr_drawdialog) // new game confirm
     {
@@ -1921,7 +1897,6 @@ void VR_Draw2D()
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
-    glPopMatrix();
 
     glwidth = oldglwidth;
     glheight = oldglheight;
@@ -1932,50 +1907,11 @@ void VR_Draw2D()
 
 void VR_DrawSbar()
 {
-    vec3_t sbar_angles, forward, right, up, target;
-    float scale_hud = vr_hud_scale.value;
-
-    glPushMatrix();
     glDisable(GL_DEPTH_TEST); // prevents drawing sprites on sprites from interferring with one another
-
-    if (vr_aimmode.value == VR_AIMMODE_CONTROLLER)
-    {
-        AngleVectors(cl.handrot[1], forward, right, up);
-
-        VectorCopy(cl.handrot[1], sbar_angles);
-
-        AngleVectors(sbar_angles, forward, right, up);
-
-        VectorMA(cl.handpos[1], -5, right, target);
-    }
-    else
-    {
-        VectorCopy(cl.aimangles, sbar_angles);
-
-        if (vr_aimmode.value == VR_AIMMODE_HEAD_MYAW || vr_aimmode.value == VR_AIMMODE_HEAD_MYAW_MPITCH)
-            sbar_angles[PITCH] = 0;
-
-        AngleVectors(sbar_angles, forward, right, up);
-
-        VectorMA(cl.viewent.origin, 1.0, forward, target);
-    }
-
-    vec3_t smoothedTarget;
-    vec3lerp(smoothedTarget, lastHudPosition, target, 1.0);
-    VectorCopy(smoothedTarget, lastHudPosition);
-
-    glTranslatef(smoothedTarget[0], smoothedTarget[1], smoothedTarget[2]);
-
-    glRotatef(sbar_angles[YAW] - 90, 0, 0, 1); // rotate around z
-    glRotatef(90 + 45 + sbar_angles[PITCH], -1, 0, 0); // keep bar at constant angled pitch towards user
-    glTranslatef(-(320.0 * scale_hud / 2), 0, 0); // center the status bar
-    glTranslatef(0, 0, 10); // move hud down a bit
-    glScalef(scale_hud, scale_hud, scale_hud);
 
     Sbar_Draw();
 
     glEnable(GL_DEPTH_TEST);
-    glPopMatrix();
 }
 
 void VR_SetAngles(vec3_t angles)

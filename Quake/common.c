@@ -2696,6 +2696,9 @@ void COM_SwitchGame (const char *paths)
 
 	COM_ResetGameDirectories(paths);
 
+	// re-init the per-mod VR weapon offset cvars for the new game directory
+	VR_InitGame();
+
 	//clear out and reload appropriate data
 	Cache_Flush ();
 	Mod_ResetAll();

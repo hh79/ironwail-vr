@@ -174,8 +174,11 @@ else()
     endif()
 endif()
 
-# Link standard C++ library for VR support
-target_link_libraries(ironwail-vr PUBLIC stdc++)
+# The C++ standard library is linked automatically: because the target has
+# C++ sources, CMake uses the C++ linker driver, which supplies the correct
+# runtime (libc++ on macOS, libstdc++/libc++ elsewhere). Do not add an
+# explicit stdc++ here - it is non-portable (legacy libstdc++ on macOS, no
+# such library on MSVC).
 
 # Copy ironwail.pak to build directory
 add_custom_command(TARGET ironwail-vr POST_BUILD

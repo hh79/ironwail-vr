@@ -2162,6 +2162,8 @@ void SCR_UpdateScreen (void)
 
 	if (vr_enabled.value && !con_forcedup)
 	{
+		// Per-eye render + 2D overlay + submit; the left eye is then blitted to
+		// the window as the mirror, so no separate 2D pass is needed here.
 		VR_UpdateScreenContent(); // phoboslab
 	}
 	else
@@ -2169,71 +2171,66 @@ void SCR_UpdateScreen (void)
 		V_UpdateBlend (); //johnfitz -- V_UpdatePalette cleaned up and renamed
 
 		V_RenderView ();
-	}
 
-	if (vr_enabled.value && !con_forcedup)
-	{
-		VR_Draw2D();
-	}
-	else
-	{
 		GL_BeginGroup ("2D");
 
 		GL_Set2D ();
 
 		//FIXME: only call this when needed
-	SCR_TileClear ();
+		SCR_TileClear ();
 
-	if (scr_drawdialog) //new game confirm
-	{
-		if (con_forcedup)
-			Draw_ConsoleBackground ();
-		else
+		if (scr_drawdialog) //new game confirm
+		{
+			if (con_forcedup)
+				Draw_ConsoleBackground ();
+			else
+				Sbar_Draw ();
+			Draw_FadeScreen (1.f);
+			SCR_DrawNotifyString ();
+		}
+		else if (scr_drawloading) //loading
+		{
+			SCR_DrawLoading ();
 			Sbar_Draw ();
-		Draw_FadeScreen (1.f);
-		SCR_DrawNotifyString ();
-	}
-	else if (scr_drawloading) //loading
-	{
-		SCR_DrawLoading ();
-		Sbar_Draw ();
-		M_Draw ();
-	}
-	else if (cl.intermission == 1 && key_dest == key_game) //end of level
-	{
-		Sbar_IntermissionOverlay ();
-		SCR_DrawDemoControls ();
-	}
-	else if (cl.intermission == 2 && key_dest == key_game) //end of episode
-	{
-		Sbar_FinaleOverlay ();
-		SCR_CheckDrawCenterString ();
-		SCR_DrawDemoControls ();
-	}
-	else
-	{
-		SCR_DrawCrosshair (); //johnfitz
-		SCR_DrawNet ();
-		SCR_DrawTurtle ();
-		SCR_DrawPause ();
-		SCR_CheckDrawCenterString ();
-		Sbar_Draw ();
-		SCR_DrawDevStats (); //johnfitz
-		SCR_DrawClock (); //johnfitz
-		SCR_DrawDemoControls ();
-		SCR_DrawSpeed ();
-		SCR_DrawEdictInfo ();
-		SCR_DrawConsole ();
-		M_Draw ();
-		SCR_DrawFPS (); //johnfitz
-		SCR_DrawSaving ();
-	}
+			M_Draw ();
+		}
+		else if (cl.intermission == 1 && key_dest == key_game) //end of level
+		{
+			Sbar_IntermissionOverlay ();
+			SCR_DrawDemoControls ();
+		}
+		else if (cl.intermission == 2 && key_dest == key_game) //end of episode
+		{
+			Sbar_FinaleOverlay ();
+			SCR_CheckDrawCenterString ();
+			SCR_DrawDemoControls ();
+		}
+		else
+		{
+			SCR_DrawCrosshair (); //johnfitz
+			SCR_DrawNet ();
+			SCR_DrawTurtle ();
+			SCR_DrawPause ();
+			SCR_CheckDrawCenterString ();
+			Sbar_Draw ();
+			SCR_DrawDevStats (); //johnfitz
+			SCR_DrawClock (); //johnfitz
+			SCR_DrawDemoControls ();
+			SCR_DrawSpeed ();
+			SCR_DrawEdictInfo ();
+			SCR_DrawConsole ();
+			M_Draw ();
+			SCR_DrawFPS (); //johnfitz
+			SCR_DrawSaving ();
+		}
 
-	Draw_Flush ();
+		Draw_Flush ();
 
-	GL_EndGroup ();
+		GL_EndGroup ();
 	}
 
 	GL_EndRendering ();
+
+	scr_inupdate = false;
 }
 

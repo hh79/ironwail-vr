@@ -737,7 +737,8 @@ static void VID_Restart (void)
 //
 	VID_VR_Disable ();
 	VID_SetMode (width, height, refreshrate, fullscreen);
-	VR_Enable ();
+	if (vr_enabled.value)
+		VR_Enable ();
 
 	//conwidth and conheight need to be recalculated
 	VID_RecalcInterfaceSize ();
