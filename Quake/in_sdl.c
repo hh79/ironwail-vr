@@ -968,6 +968,15 @@ void IN_Commands (void)
 	const float stickthreshold = 0.9;
 	const float triggerthreshold = joy_deadzone_trigger.value;
 	
+	// In VR the tracked controllers provide all input (vr.c VR_Move). SteamVR
+	// also exposes them as a "Steam Virtual Gamepad" SDL controller; if we let
+	// that emit key events too, the triggers/buttons double-fire and — when the
+	// virtual gamepad's trigger axis reads above joy_deadzone_trigger at rest —
+	// the SDL auto-repeat keeps +attack held forever (continuous fire).
+	extern cvar_t vr_enabled;
+	if (vr_enabled.value)
+		return;
+
 	if (!joy_active_controller)
 		return;
 
@@ -1080,6 +1089,12 @@ void IN_JoyMove (usercmd_t *cmd)
 	joyaxis_t moveRaw, moveDeadzone, moveEased;
 	joyaxis_t lookRaw, lookDeadzone, lookEased;
 	extern	cvar_t	sv_maxspeed;
+
+	// see IN_Commands: the SDL gamepad (SteamVR's virtual gamepad) is not used
+	// in VR — movement comes from the tracked controllers via VR_Move.
+	extern cvar_t vr_enabled;
+	if (vr_enabled.value)
+		return;
 
 	if (!joy_active_controller)
 		return;
