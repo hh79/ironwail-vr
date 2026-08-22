@@ -1135,6 +1135,14 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
 		}
 	}
 
+	// The blend function above is ignored unless GL_BLEND is enabled, and
+	// passes that bypass GL_SetState (the VR 2D/crosshair overlays) can
+	// leave it disabled; (re-)enable it whenever a blending mode is
+	// requested so the state can't leak into the next scene pass and make
+	// translucent water/entities render opaque.
+	if ((mask & GLS_MASK_BLEND) != GLS_BLEND_OPAQUE)
+		glEnable(GL_BLEND);
+
 	if (diff & GLS_MASK_CULL)
 	{
 		unsigned cull = mask & GLS_MASK_CULL;

@@ -42,6 +42,7 @@ void VR_UpdateScreenContent();
 void VR_ShowCrosshair();
 void VR_Draw2D();
 void VR_Move(usercmd_t *cmd);
+void VR_CheckSignon();
 void VR_InitGame();
 qboolean VR_BuildProjectionMatrix(float *matrix, float znear, float zfar); // Build asymmetric per-eye projection in ironwail matrix convention
 void VR_PushYaw();

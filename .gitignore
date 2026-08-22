@@ -9,3 +9,10 @@ Quake/ironwail
 build/
 /.vs
 /out/
+/CMakeCache.txt
+/CMakeFiles/
+/Makefile
+/cmake_install.cmake
+/id1/
+/ironwail
+/ironwail-vr

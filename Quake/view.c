@@ -74,6 +74,7 @@ vec3_t	v_punchangles[2]; //johnfitz -- copied from cl.punchangle.  0 is current,
 extern cvar_t vr_enabled;
 extern cvar_t vr_aimmode;
 extern cvar_t vr_viewkick;
+extern cvar_t vr_gunkick;
 
 /*
 ===============
@@ -956,18 +957,23 @@ void V_CalcRefdef (void)
 	view->scale = ENTSCALE_DEFAULT;
 
 //johnfitz -- v_gunkick
-	if (v_gunkick.value == 1) //original quake kick
-		VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
-	if (v_gunkick.value == 2) //lerped kick
+	// weapon-fire punch kicks the head-locked view in VR; off by default
+	// (vr_gunkick), mirroring the vr_viewkick gate for damage kicks
+	if (!vr_enabled.value || vr_gunkick.value)
 	{
-		float punchblend = (cl.time - cl.punchtime) / 0.1f;
+		if (v_gunkick.value == 1) //original quake kick
+			VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
+		if (v_gunkick.value == 2) //lerped kick
+		{
+			float punchblend = (cl.time - cl.punchtime) / 0.1f;
 
-		if (punchblend < 0.0f) punchblend = 0.0f;
-		if (punchblend > 1.0f) punchblend = 1.0f;
+			if (punchblend < 0.0f) punchblend = 0.0f;
+			if (punchblend > 1.0f) punchblend = 1.0f;
 
-		r_refdef.viewangles[0] += v_punchangles[1][0] + (v_punchangles[0][0] - v_punchangles[1][0]) * punchblend;
-		r_refdef.viewangles[1] += v_punchangles[1][1] + (v_punchangles[0][1] - v_punchangles[1][1]) * punchblend;
-		r_refdef.viewangles[2] += v_punchangles[1][2] + (v_punchangles[0][2] - v_punchangles[1][2]) * punchblend;
+			r_refdef.viewangles[0] += v_punchangles[1][0] + (v_punchangles[0][0] - v_punchangles[1][0]) * punchblend;
+			r_refdef.viewangles[1] += v_punchangles[1][1] + (v_punchangles[0][1] - v_punchangles[1][1]) * punchblend;
+			r_refdef.viewangles[2] += v_punchangles[1][2] + (v_punchangles[0][2] - v_punchangles[1][2]) * punchblend;
+		}
 	}
 //johnfitz
 

@@ -66,6 +66,7 @@ typedef struct {
     vec3_t orientation;
     vr::HmdVector3_t rawvector;
     vr::HmdQuaternion_t raworientation;
+    bool triggerDown;
 } vr_controller;
 
 // OpenGL Extensions
@@ -245,6 +246,7 @@ extern refdef_t r_refdef;
 
 DEFINE_CVAR(vr_enabled, 0, CVAR_NONE);
 DEFINE_CVAR(vr_viewkick, 0, CVAR_NONE);
+DEFINE_CVAR(vr_gunkick, 0, CVAR_NONE);
 DEFINE_CVAR(vr_lefthanded, 0, CVAR_NONE);
 
 DEFINE_CVAR(vr_crosshair, 1, CVAR_ARCHIVE);
@@ -916,6 +918,7 @@ void VID_VR_Init()
 
     // Sickness stuff
     Cvar_RegisterVariable(&vr_viewkick);
+    Cvar_RegisterVariable(&vr_gunkick);
 
     // Debug pose/view dump toggle (console only; deliberately not in the VR menu)
     Cvar_RegisterVariable(&vr_debug_pose);
@@ -2039,11 +2042,26 @@ void DoTrigger(vr_controller* controller, int quakeKey)
 {
     if (axisTrigger != -1)
     {
-        bool triggerWasDown = controller->lastState.rAxis[axisTrigger].x > 0.5f;
-        bool triggerDown = controller->state.rAxis[axisTrigger].x > 0.5f;
-        if (triggerDown != triggerWasDown)
+        float val = controller->state.rAxis[axisTrigger].x;
+        bool down = controller->triggerDown;
+
+        // Hysteresis: latch when crossing the down threshold,
+        // release only below a lower up threshold, so values
+        // jittering around 0.5 don't fabricate extra edges.
+        if (!down)
         {
-            Key_Event(quakeKey, triggerDown);
+            if (val > 0.5f)
+                down = true;
+        }
+        else if (val < 0.4f)
+        {
+            down = false;
+        }
+
+        if (down != controller->triggerDown)
+        {
+            controller->triggerDown = down;
+            Key_Event(quakeKey, down);
         }
     }
 }
@@ -2069,6 +2087,30 @@ void DoAxis(vr_controller* controller, int axis, int quakeKeyNeg,
     }
 }
 
+/*
+=================
+VR_CheckSignon
+=================
+
+CL_SendCmd stops calling VR_Move while cls.signon != SIGNONS
+(load/reconnect gaps). Controller edges keep being sampled every
+frame in that window but are never consumed, so a key physically
+held across the gap (e.g. the trigger confirming a menu load)
+would leave a stale key-down in the Quake key state that
+double-fires the next press, or auto-fires on spawn while
+con_forcedup is up. Flush the key state once per drop.
+=================
+*/
+void VR_CheckSignon (void)
+{
+	static int lastSignon = -1;
+
+	if (vr_enabled.value && lastSignon == SIGNONS && cls.signon != SIGNONS)
+		Key_ClearStates ();
+
+	lastSignon = cls.signon;
+}
+
 void VR_Move(usercmd_t *cmd)
 {
     if(!vr_enabled.value)
@@ -2078,7 +2120,13 @@ void VR_Move(usercmd_t *cmd)
 
     // k_EButton_Axis1 === k_EButton_SteamVR_Trigger
     DoTrigger(&controllers[0], K_LTRIGGER);
-    DoTrigger(&controllers[1], K_RTRIGGER);
+
+    // In menus the right trigger confirms items as K_ENTER (below);
+    // suppress K_RTRIGGER there so its +attack binding can't leave
+    // a stale key-down that leaks into the next session after a
+    // signon change (load/reconnect).
+    if (key_dest != key_menu)
+        DoTrigger(&controllers[1], K_RTRIGGER);
 
     // k_EButton_Grip
     DoKey(&controllers[0], vr::k_EButton_Grip, K_LSHOULDER);

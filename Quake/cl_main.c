@@ -818,6 +818,9 @@ void CL_SendCmd (void)
 {
 	usercmd_t		cmd;
 
+	// flush stale VR key state on signon drops (load/reconnect gaps)
+	VR_CheckSignon ();
+
 	if (cls.state != ca_connected)
 		return;
 
