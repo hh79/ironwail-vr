@@ -2160,7 +2160,11 @@ void SCR_UpdateScreen (void)
 //
 	SCR_SetUpToDrawConsole ();
 
-	if (vr_enabled.value && !con_forcedup)
+	// Not gated on !con_forcedup: the VR path also renders the boot/main menu,
+	// the loading plaque and the forced-up console as per-eye billboards
+	// (VR_Draw2D handles those states). V_RenderView skips the 3D scene when
+	// con_forcedup, and the mirror keeps showing the left eye.
+	if (vr_enabled.value)
 	{
 		// Per-eye render + 2D overlay + submit; the left eye is then blitted to
 		// the window as the mirror, so no separate 2D pass is needed here.

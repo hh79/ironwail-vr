@@ -1030,6 +1030,18 @@ extern vrect_t	scr_vrect;
 void V_RenderView (void)
 {
 	if (con_forcedup)
+	{
+		// Menu/loading/forced-console frames must NOT run V_CalcRefdef /
+		// R_SetFrustum here: doing so inside the VR per-eye path corrupts the
+		// first in-game scene render (garbled world geometry). The 2D billboard
+		// gets its per-eye view-projection locally in VR_Draw2D instead.
+		return;
+	}
+
+	// No world/player entity yet (cl_entities is a hunk pointer, NULL until
+	// CL_Init runs): there is no 3D scene to render. The VR per-eye 2D
+	// overlay is drawn separately and still shows the boot/loading state.
+	if (!cl_entities)
 		return;
 
 	if (cl.intermission)

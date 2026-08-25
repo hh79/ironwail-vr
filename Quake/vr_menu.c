@@ -194,7 +194,7 @@ static void VR_MenuPrintOptionValue(int cx, int cy, int option)
         case VR_OPTION_GUNMODELSCALE:            printAsStr(vr_gunmodelscale); break;
         case VR_OPTION_GUNMODELY:                printAsStr(vr_gunmodely); break;
         case VR_OPTION_CROSSHAIRY:               printAsStr(vr_crosshairy); break;
-        case VR_OPTION_PROJECTILESPAWN_Z_OFFSET: printAsStr(vr_projectilespawn_z_offset); break;
+        case VR_OPTION_MUZZLE_DISTANCE:          printAsStr(vr_muzzle_distance); break;
         case VR_OPTION_HUD_SCALE:                printAsStr(vr_hud_scale); break;
         case VR_OPTION_MENU_SCALE:               printAsStr(vr_menu_scale); break;
         case VR_OPTION_IMPULSE9:                 break;
@@ -316,8 +316,8 @@ static void VR_MenuKeyOption(int key, int option)
         case VR_OPTION_CROSSHAIRY:
             adjustF(vr_crosshairy, 0.05f, -10.0f, 10.f);
             break;
-        case VR_OPTION_PROJECTILESPAWN_Z_OFFSET:
-            adjustF(vr_projectilespawn_z_offset, 1.f, -24.0f, 24.f);
+        case VR_OPTION_MUZZLE_DISTANCE:
+            adjustF(vr_muzzle_distance, 1.f, 0.0f, 100.f);
             break;
         case VR_OPTION_HUD_SCALE:
             adjustF(vr_hud_scale, 0.005f, 0.01f, 0.1f);
@@ -486,8 +486,8 @@ void VR_MenuDraw (void)
 				M_Print(16, y, "              Crosshair Y");
 		        VR_MenuPrintOptionValue(240, y, i);
 				break;
-			case VR_OPTION_PROJECTILESPAWN_Z_OFFSET:
-				M_Print(16, y, "       Projectile Spawn Z");
+			case VR_OPTION_MUZZLE_DISTANCE:
+				M_Print(16, y, "            Muzzle Distance");
 		        VR_MenuPrintOptionValue(240, y, i);
 				break;
 			case VR_OPTION_HUD_SCALE:

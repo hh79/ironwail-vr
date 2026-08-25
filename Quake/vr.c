@@ -22,6 +22,7 @@ FILE *__iob_func() {
 
 extern "C" {
 void VID_Refocus();
+void VID_GetDrawableSize(int *w, int *h);
 void SCR_UpdateScreenContent();
 void SCR_DrawNotifyString();
 void SCR_CheckDrawCenterString();
@@ -37,6 +38,7 @@ void Scrap_Upload();
 void Draw_Flush();
 void R_VRWarpScaleView(GLuint srctex, GLuint dstfbo, int width, int height);
 extern qboolean water_warp;
+extern cvar_t cl_gun_fovscale;
 }
 
 typedef struct {
@@ -222,8 +224,6 @@ static vec3_t lastOrientation = { 0, 0, 0 };
 static vec3_t lastAim = { 0, 0, 0 };
 
 static qboolean vr_initialized = false;
-static GLuint mirror_texture = 0;
-static GLuint mirror_fbo = 0;
 static int attempt_to_refocus_retry = 0;
 
 static vec3_t headOrigin;
@@ -260,7 +260,9 @@ DEFINE_CVAR(vr_gunmodeloffsets, 0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_gunmodelpitch, 0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_gunmodelscale, 1.0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_gunmodely, 0, CVAR_ARCHIVE);
-DEFINE_CVAR(vr_projectilespawn_z_offset, 24, CVAR_ARCHIVE);
+// Distance from the grip anchor to the barrel tip, in viewmodel units along
+// the model's +X. Drives the projectile spawn point (see SV_Physics_Client).
+DEFINE_CVAR(vr_muzzle_distance, 30, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_crosshairy, 0, CVAR_ARCHIVE);
 DEFINE_CVAR(vr_world_scale, 1.0, CVAR_ARCHIVE); 
 DEFINE_CVAR(vr_floor_offset, 0, CVAR_ARCHIVE);
@@ -909,7 +911,7 @@ void VID_VR_Init()
     Cvar_RegisterVariable(&vr_snap_turn);
     Cvar_RegisterVariable(&vr_turn_speed);
     Cvar_RegisterVariable(&vr_world_scale);
-    Cvar_RegisterVariable(&vr_projectilespawn_z_offset);
+    Cvar_RegisterVariable(&vr_muzzle_distance);
     Cvar_RegisterVariable(&vr_hud_scale);
     Cvar_RegisterVariable(&vr_menu_scale);
     Cvar_SetCallback(&vr_deadzone, VR_Deadzone_f);
@@ -1186,6 +1188,11 @@ void VR_HandleGammaCorrect()
 
 void SetHandPos(int index, entity_t *player)
 {
+    // Boot/main-menu/loading: no player entity yet (cl_entities is NULL until
+    // CL_Init allocates it), so there is nothing to anchor the hands to.
+    if (!player)
+        return;
+
     vec3_t headLocalPreRot;
     _VectorSubtract(controllers[index].position, headOrigin, headLocalPreRot);
     vec3_t headLocal;
@@ -1198,13 +1205,13 @@ void SetHandPos(int index, entity_t *player)
 }
 
 void IdentifyAxes(int device);
+static void VR_DrawMirrorOverlay(void);
 
 extern "C" {
 void VR_UpdateScreenContent()
 {
     int i;
     vec3_t orientation;
-    GLint w, h;
 
     // Last chance to enable VR Mode - we get here when the game already start up with vr_enabled 1
     // If enabling fails, unset the cvar and return.
@@ -1213,9 +1220,6 @@ void VR_UpdateScreenContent()
         Cvar_Set("vr_enabled", "0");
         return;
     }
-
-    w = glwidth;
-    h = glheight;
 
     entity_t *player = &cl_entities[cl.viewentity];
 
@@ -1486,7 +1490,61 @@ void VR_UpdateScreenContent()
         SetHandPos(1, player);
 
         VectorCopy(cl.handrot[1], cl.aimangles); // Sets the shooting angle
-        // TODO: what sets the shooting origin?
+
+        // Compute the world-space muzzle of the rendered viewmodel so the
+        // server can invert the game code's fixed spawn offsets onto it (see
+        // SV_Physics_Client). Mirrors the viewmodel transform in r_alias.c:
+        // origin = handpos, rotation = the R_EntityMatrix angle convention
+        // (entity/model pitch is "backward"), plus Mod_Weapon's scale_origin
+        // and alias scale. Cleared when no weapon pose exists (menu, loading).
+        cl.muzzle_valid = false;
+        if (cl.viewent.model)
+        {
+            aliashdr_t* hdr = (aliashdr_t *)Mod_Extradata(cl.viewent.model);
+
+            // Viewmodel angles, exactly as CalcGunAngle (view.c) produces them.
+            vec3_t vangles;
+            vangles[PITCH] = -(cl.handrot[1][PITCH]) + vr_gunmodelpitch.value;
+            vangles[YAW] = cl.handrot[1][YAW];
+            vangles[ROLL] = cl.handrot[1][ROLL];
+
+            // cl_gun_fovscale stretches the weapon's y/z to match the wide VR
+            // FOV (r_alias.c); replicate it so the muzzle stays on the barrel.
+            float fovscale = 1.0f;
+            if (r_refdef.basefov > 90.0f && cl_gun_fovscale.value)
+                fovscale = 1.0f + (tanf(r_refdef.basefov * (0.5f * M_PI / 180.0f)) - 1.0f) * cl_gun_fovscale.value;
+
+            // Model-space point: grip anchor (scale_origin) plus the muzzle
+            // distance along the barrel (+X), scaled like the renderer.
+            vec3_t local;
+            local[0] = hdr->scale_origin[0] + vr_muzzle_distance.value * hdr->scale[0];
+            local[1] = hdr->scale_origin[1] * fovscale;
+            local[2] = hdr->scale_origin[2] * fovscale;
+
+            // Rotate by the viewmodel angles using the R_EntityMatrix
+            // convention (model pitch is backward: forward z = +sin(pitch)).
+            float yaw = DEG2RAD(vangles[YAW]);
+            float pitch = DEG2RAD(vangles[PITCH]);
+            float roll = DEG2RAD(vangles[ROLL]);
+            float sy = sinf(yaw), cy = cosf(yaw);
+            float sp = sinf(pitch), cp = cosf(pitch);
+            float sr = sinf(roll), cr = cosf(roll);
+
+            cl.muzzlepos[0] = cl.handpos[1][0]
+                + (cy * cp) * local[0]
+                + (-cy * sp * sr - cr * sy) * local[1]
+                + (sy * sr - cr * cy * sp) * local[2];
+            cl.muzzlepos[1] = cl.handpos[1][1]
+                + (sy * cp) * local[0]
+                + (cr * cy - sy * sp * sr) * local[1]
+                + (-cy * sr - cr * sy * sp) * local[2];
+            cl.muzzlepos[2] = cl.handpos[1][2]
+                + (sp) * local[0]
+                + (cp * sr) * local[1]
+                + (cr * cp) * local[2];
+
+            cl.muzzle_valid = true;
+        }
 
         break;
     }
@@ -1553,12 +1611,37 @@ void VR_UpdateScreenContent()
         RenderScreenForCurrentEye_OVR();
     }
 
-    // Blit mirror texture to backbuffer
-    glBindFramebufferEXT(GL_READ_FRAMEBUFFER_EXT, eyes[0].fbo.framebuffer);
-    glBindFramebufferEXT(GL_DRAW_FRAMEBUFFER_EXT, 0);
-    glBlitFramebufferEXT(0, eyes[0].fbo.size.width, eyes[0].fbo.size.height, 0,
-        0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-    glBindFramebufferEXT(GL_READ_FRAMEBUFFER_EXT, 0);
+    // Blit mirror texture to backbuffer. The per-eye path leaves the GL
+    // viewport at the eye size and the 2D passes may leave a scissor rect
+    // armed; reset both so the blit always covers the whole window. Some
+    // drivers clip framebuffer blits to the viewport/scissor, and an
+    // uncovered area keeps the previous backbuffer content (e.g. the main
+    // menu) — the "ghost" bar on the right of the preview during gameplay.
+    // Use the real drawable size (not vid.width) so a resized/DPI-scaled
+    // window can't leave an un-blitted strip.
+    {
+        int dw, dh;
+        VID_GetDrawableSize(&dw, &dh);
+        if (vr_debug_pose.value)
+            Sys_Printf("[VR DEBUG] mirror dst %dx%d (vid %dx%d)\n", dw, dh, vid.width, vid.height);
+        glBindFramebufferEXT(GL_READ_FRAMEBUFFER_EXT, eyes[0].fbo.framebuffer);
+        glBindFramebufferEXT(GL_DRAW_FRAMEBUFFER_EXT, 0);
+        glDisable(GL_SCISSOR_TEST);
+        glViewport(0, 0, dw, dh);
+        // Source rect is (srcX0, srcY0, srcX1, srcY1) = (0, height, width, 0).
+        // The reference had width/height swapped here, which overruns the
+        // source FBO's right edge on portrait render targets (e.g. Quest 3),
+        // leaving the matching right-hand strip of the window unwritten (stale
+        // backbuffer = the "ghost" menu bar on the desktop mirror).
+        glBlitFramebufferEXT(0, eyes[0].fbo.size.height, eyes[0].fbo.size.width, 0,
+            0, dh, dw, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        glBindFramebufferEXT(GL_READ_FRAMEBUFFER_EXT, 0);
+    }
+
+    // Flat 2D overlay on the mirror (menu/HUD), restoring the old desktop
+    // preview look. The eye blit alone shows the billboard small in the
+    // center with the eye's black surround around it.
+    VR_DrawMirrorOverlay();
 }
 } // extern "C"
 
@@ -1655,24 +1738,16 @@ void VR_ShowCrosshair()
     glDisable(GL_CULL_FACE);
 
     // calc the line and draw
-    // TODO: Make the laser align correctly
     if (vr_aimmode.value == VR_AIMMODE_CONTROLLER)
     {
-        VectorCopy(cl.handpos[1], start);
+        // Crosshair, muzzle flash and projectile spawn share one point: the
+        // computed muzzle (falls back to the grip when no pose is available).
+        if (cl.muzzle_valid)
+            VectorCopy(cl.muzzlepos, start);
+        else
+            VectorCopy(cl.handpos[1], start);
 
-        vec3_t ofs = {
-            vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON].value,
-            vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 1].value,
-            vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 2].value + vr_gunmodely.value
-        };
-
-        AngleVectors(cl.handrot[1], forward, right, up);
-        vec3_t fwd2;
-        VectorCopy(forward, fwd2);
-        fwd2[0] *= vr_gunmodelscale.value * ofs[2];
-        fwd2[1] *= vr_gunmodelscale.value * ofs[2];
-        fwd2[2] *= vr_gunmodelscale.value * ofs[2];
-        VectorAdd(start, fwd2, start);
+        AngleVectors(cl.aimangles, forward, right, up);
     }
     else
     {
@@ -1771,6 +1846,14 @@ void VR_Draw2D()
         oldconwidth = vid.conwidth,
         oldconheight = vid.conheight;
 
+    // scr_con_current is tracked in window pixels (SCR_SetUpToDrawConsole ran
+    // with the real glheight); the 2D overlay below draws on a 320x200 canvas,
+    // so rescale it into that space or the console canvas transform (which
+    // offsets by scr_con_current/glheight) pushes the console background far
+    // off the billboard - the menu background appears way below the items.
+    extern float scr_con_current;
+    float old_con_current = scr_con_current;
+
     // Set up ironwail's 2D state (canvas transform + viewport) while glwidth/
     // glheight still match the eye framebuffer. Without this the 2D canvas
     // transform is never initialized (GL_SetCanvas used to bail out in VR) and
@@ -1787,6 +1870,8 @@ void VR_Draw2D()
     vid.conwidth = 320;
     vid.conheight = 200;
 
+    scr_con_current = old_con_current * (float)glheight / (float)q_max(vid.height, 1);
+
     // draw 2d elements 1m from the users face, centered
     glDisable(GL_DEPTH_TEST); // prevents drawing sprites on sprites from interferring with one another
     glEnable(GL_BLEND);
@@ -1799,7 +1884,28 @@ void VR_Draw2D()
 
     AngleVectors(menu_angles, forward, right, up);
 
-    VectorMA(r_refdef.vieworg, 48, forward, target);
+    // The billboard is anchored to the eye. In-game r_refdef.vieworg is the
+    // per-eye view origin (V_CalcRefdef runs every frame); during menu/loading
+    // frames we must NOT run V_CalcRefdef (it corrupts the first in-game scene
+    // render), so derive the same view origin directly here.
+    vec3_t billboard_vieworg;
+    if (con_forcedup)
+    {
+        extern vec3_t vr_viewOffset;
+        if (cl_entities)
+        {
+            VectorAdd(cl_entities[cl.viewentity].origin, vr_viewOffset, billboard_vieworg);
+            billboard_vieworg[0] += 1.0f/32;
+            billboard_vieworg[1] += 1.0f/32;
+            billboard_vieworg[2] += 1.0f/32;
+        }
+        else
+            VectorCopy(r_refdef.vieworg, billboard_vieworg);
+    }
+    else
+        VectorCopy(r_refdef.vieworg, billboard_vieworg);
+
+    VectorMA(billboard_vieworg, 48, forward, target);
 
     // The HUD/status bar is drawn through this same billboard. It must be
     // locked to the eye: any lag here (quakespasm-openvr eases only the menu,
@@ -1837,7 +1943,53 @@ void VR_Draw2D()
         // viewproj = ViewProj * Model (MatrixMultiply is in-place: left = left*right)
         {
             float viewproj[16];
-            memcpy (viewproj, r_matviewproj, sizeof (viewproj));
+
+            if (con_forcedup)
+            {
+                // Menu/loading: build the per-eye view-projection locally so we
+                // never mutate the engine's render state (r_matproj/r_matview/
+                // r_matviewproj/r_framedata/frustum) that R_SetFrustum normally
+                // owns - doing that during con_forcedup frames garbles the first
+                // in-game scene render (see view.c V_RenderView).
+                float w, h, d, znear, zfar;
+                float proj[16], view[16], rotation[16], translation[16];
+
+                w = 1.f / tanf(r_refdef.fov_x * 0.5f * M_PI_DIV_180);
+                h = 1.f / tanf(r_refdef.fov_y * 0.5f * M_PI_DIV_180);
+                d = 12.f * q_min(w, h);
+                znear = CLAMP(0.5f, d, 4.f);
+                zfar = gl_farclip.value;
+
+                if (VR_BuildProjectionMatrix(proj, znear, zfar))
+                {
+                    IdentityMatrix(view);
+                    RotationMatrix(rotation, -menu_angles[ROLL] * M_PI_DIV_180, 0);
+                    MatrixMultiply(view, rotation);
+                    RotationMatrix(rotation, -menu_angles[PITCH] * M_PI_DIV_180, 1);
+                    MatrixMultiply(view, rotation);
+                    RotationMatrix(rotation, -menu_angles[YAW] * M_PI_DIV_180, 2);
+                    MatrixMultiply(view, rotation);
+                    TranslationMatrix(translation,
+                        -billboard_vieworg[0], -billboard_vieworg[1], -billboard_vieworg[2]);
+                    MatrixMultiply(view, translation);
+
+                    memcpy(viewproj, proj, sizeof(viewproj));
+                    MatrixMultiply(viewproj, view);
+                }
+                else
+                {
+                    // Should not happen (current_eye is set in this path)
+                    extern float r_matviewproj[16];
+                    memcpy(viewproj, r_matviewproj, sizeof(viewproj));
+                }
+            }
+            else
+            {
+                // In-game: the current eye's matrix, set per eye by R_SetFrustum.
+                extern float r_matviewproj[16];
+                memcpy(viewproj, r_matviewproj, sizeof(viewproj));
+            }
+
             MatrixMultiply (viewproj, model);
             memcpy (vr_gui_matrix, viewproj, sizeof (viewproj));
         }
@@ -1905,6 +2057,7 @@ void VR_Draw2D()
     glheight = oldglheight;
     vid.conwidth = oldconwidth;
     vid.conheight = oldconheight;
+    scr_con_current = old_con_current;
 }
 
 
@@ -1915,6 +2068,78 @@ void VR_DrawSbar()
     Sbar_Draw();
 
     glEnable(GL_DEPTH_TEST);
+}
+
+/* =================
+VR_DrawMirrorOverlay
+
+Desktop preview: after the left eye is blitted to the window, overlay the
+2D (menu/HUD) flat on top, the way the flat desktop path did before menus
+started rendering per-eye. The raw eye image alone shows the 2D billboard
+small in the center with the eye's black surround around it (the eye FOV
+is far wider than the menu billboard), which reads as big black bars in
+the mirror window.
+================= */
+static void VR_DrawMirrorOverlay(void)
+{
+    extern void GL_Set2D();
+    qboolean draw_sbar = false;
+
+    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
+    {
+        // Cover the full drawable (same as the mirror blit above), not just
+        // vid.width, so a resized/DPI-scaled window can't leave stale content.
+        int dw, dh;
+        VID_GetDrawableSize(&dw, &dh);
+        glViewport(0, 0, dw, dh);
+    }
+    glDisable(GL_SCISSOR_TEST);
+
+    // Reset the 2D canvas to the flat identity-GUI-matrix state; the eye
+    // image blitted into the window shows through wherever the 2D is
+    // transparent. Same content dispatch as VR_Draw2D.
+    GL_Set2D();
+    Draw_Flush();
+
+    if (scr_drawdialog) // new game confirm
+    {
+        if (con_forcedup)
+            Draw_ConsoleBackground();
+        Draw_FadeScreen(1.0f);
+        SCR_DrawNotifyString();
+    }
+    else if (scr_drawloading) //loading
+    {
+        SCR_DrawLoading();
+        draw_sbar = true;
+    }
+    else if (cl.intermission == 1 && key_dest == key_game) //end of level
+    {
+        Sbar_IntermissionOverlay();
+    }
+    else if (cl.intermission == 2 && key_dest == key_game) //end of episode
+    {
+        Sbar_FinaleOverlay();
+        SCR_CheckDrawCenterString();
+    }
+    else
+    {
+        SCR_DrawNet();
+        SCR_DrawTurtle();
+        SCR_DrawPause();
+        SCR_CheckDrawCenterString();
+        SCR_DrawConsole();
+        M_Draw();
+        SCR_DrawDevStats(); //johnfitz
+        SCR_DrawFPS(); //johnfitz
+        SCR_DrawClock(); //johnfitz
+        draw_sbar = true;
+    }
+
+    if (draw_sbar)
+        Sbar_Draw();
+
+    Draw_Flush();
 }
 
 void VR_SetAngles(vec3_t angles)
@@ -2111,21 +2336,33 @@ void VR_CheckSignon (void)
 	lastSignon = cls.signon;
 }
 
-void VR_Move(usercmd_t *cmd)
-{
-    if(!vr_enabled.value)
-    {
-        return;
-    }
+/* =================
+VR_UpdateInput
 
-    // k_EButton_Axis1 === k_EButton_SteamVR_Trigger
-    DoTrigger(&controllers[0], K_LTRIGGER);
+Poll the tracked controllers for button/axis edges and emit Quake key
+events. Runs every frame from IN_Commands (the host input section), so
+the controllers work in the menus even before a game is connected -
+CL_SendCmd/VR_Move only run once cls.signon == SIGNONS, which never
+happens at the boot/main menu or on the loading plaque.
+================= */
+void VR_UpdateInput(void)
+{
+    if (!vr_enabled.value)
+        return;
+
+    // Weapon triggers only while a game is actually connected. VR_Move (and
+    // with it K_LTRIGGER/K_RTRIGGER) used to be unreachable before
+    // cls.signon == SIGNONS; emitting them at the boot menu would let a held
+    // trigger latch +attack/+attack2 before the first spawn (signon only rises
+    // at boot, so VR_CheckSignon's key flush on drops never fires).
+    if (cls.signon == SIGNONS)
+        DoTrigger(&controllers[0], K_LTRIGGER);
 
     // In menus the right trigger confirms items as K_ENTER (below);
     // suppress K_RTRIGGER there so its +attack binding can't leave
     // a stale key-down that leaks into the next session after a
     // signon change (load/reconnect).
-    if (key_dest != key_menu)
+    if (cls.signon == SIGNONS && key_dest != key_menu)
         DoTrigger(&controllers[1], K_RTRIGGER);
 
     // k_EButton_Grip
@@ -2168,10 +2405,26 @@ void VR_Move(usercmd_t *cmd)
         DoTrigger(&controllers[1], K_ENTER);
     }
     else
-    {        
+    {
         DoAxis(&controllers[1], 0, K_LEFTARROW, K_RIGHTARROW, vr_joystick_axis_menu_deadzone_extra.value);
         DoAxis(&controllers[1], 1, K_DOWNARROW, K_UPARROW, vr_joystick_axis_menu_deadzone_extra.value);
+    }
+}
 
+/* =================
+VR_Move
+================= */
+void VR_Move(usercmd_t *cmd)
+{
+    if (!vr_enabled.value)
+        return;
+
+    // Menu navigation (arrows/enter) is handled in VR_UpdateInput; don't
+    // apply movement while a menu is up.
+    if (key_dest == key_menu)
+        return;
+
+    {
         vec3_t lfwd, lright, lup;
 
         // Get HMD orientation for head based movement

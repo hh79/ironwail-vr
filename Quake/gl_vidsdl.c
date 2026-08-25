@@ -252,6 +252,25 @@ static void VID_Gamma_Init (void)
 	Cvar_RegisterVariable (&vid_contrast);
 }
 
+/* =================
+VID_GetDrawableSize
+
+The actual pixel size of the GL backbuffer. On most setups this equals
+vid.width/vid.height, but a resized or DPI-scaled window can make the
+drawable wider than the logical size, and the VR mirror must cover the
+full drawable or the uncovered strip keeps stale backbuffer content.
+================= */
+void VID_GetDrawableSize (int *w, int *h)
+{
+	if (draw_context)
+		SDL_GL_GetDrawableSize (draw_context, w, h);
+	else
+	{
+		*w = vid.width;
+		*h = vid.height;
+	}
+}
+
 /*
 ======================
 VID_GetCurrentWidth

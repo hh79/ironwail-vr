@@ -266,6 +266,12 @@ typedef struct
 	// VR hand tracking
 	vec3_t		handpos[2];
 	vec3_t		handrot[2];
+
+	// VR: world-space muzzle of the rendered viewmodel (controller aim mode),
+	// computed once per frame in the render path. muzzle_valid gates the
+	// server-side projectile-origin swap in SV_Physics_Client.
+	vec3_t		muzzlepos;
+	qboolean	muzzle_valid;
 } client_state_t;
 
 

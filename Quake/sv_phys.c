@@ -1034,38 +1034,97 @@ void SV_Physics_Client (edict_t	*ent, int num)
 
 	pr_global_struct->time = qcvm->time;
 
-	// VR: Replace player origin with hand origin for weapon positioning
+	// VR: relocate the local player's origin to the rendered muzzle for the
+	// duration of PlayerPostThink and invert the game code's fixed per-weapon
+	// spawn offsets (id1 weapons.qc / FireBullets), so projectiles emerge
+	// from the barrel tip instead of the torso. Gated to controller aim mode
+	// with a valid muzzle pose; unknown/mod weapons keep the stock spawn.
 	vec3_t restoreOrigin;
-	if (vr_enabled.value)
+	vec3_t restoreAbsmin, restoreAbsmax;
+	qboolean swapped = false;
+	extern cvar_t vr_aimmode;
+	if (vr_enabled.value && num == cl.viewentity && cl.muzzle_valid
+		&& vr_aimmode.value == VR_AIMMODE_CONTROLLER)
 	{
-		extern int weaponCVarEntry;
+		const int weapon = (int)ent->v.weapon;
+		qboolean known = true;
+		vec3_t fwd, right, up;
 		vec3_t adj;
-		VectorCopy(cl.handpos[1], adj);
 
-		vec3_t ofs = {
-		   vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON].value,
-		   vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 1].value,
-		   vr_weapon_offset[weaponCVarEntry * VARS_PER_WEAPON + 2].value + vr_gunmodely.value
-		};
+		// Direction basis matches what the progs compute with
+		// makevectors(self.v_angle) (SV_ReadClientMove stores the usercmd
+		// angles raw into v_angle), so the inversion is self-consistent.
+		AngleVectors (ent->v.v_angle, fwd, right, up);
+		VectorCopy (cl.muzzlepos, adj);
 
-		vec3_t fwd2, right, up;
-		AngleVectors(cl.handrot[1], fwd2, right, up);
-		fwd2[0] *= vr_gunmodelscale.value * ofs[2];
-		fwd2[1] *= vr_gunmodelscale.value * ofs[2];
-		fwd2[2] *= vr_gunmodelscale.value * ofs[2];
-		VectorAdd(adj, fwd2, adj);
+		switch (weapon)
+		{
+		case IT_ROCKET_LAUNCHER:
+			VectorMA (adj, -8.0f, fwd, adj);	// qprogs: self.origin + v_forward*8 + '0 0 16'
+			adj[2] -= 16.0f;
+			break;
+		case IT_NAILGUN:
+		case IT_SUPER_NAILGUN:
+		case IT_LIGHTNING:
+			adj[2] -= 16.0f;			// qprogs: self.origin + '0 0 16' (+ v_right*ox jitter)
+			break;
+		case IT_SHOTGUN:
+		case IT_SUPER_SHOTGUN:
+			VectorMA (adj, -10.0f, fwd, adj);	// FireBullets: self.origin + v_forward*10, z from absmin/size
+			break;
+		case IT_GRENADE_LAUNCHER:
+			break;					// qprogs: bare self.origin
+		default:
+			known = false;				// mod/unknown weapon: stock spawn
+			break;
+		}
 
-		VectorCopy(ent->v.origin, restoreOrigin);
-		VectorCopy(adj, ent->v.origin);
-		ent->v.origin[2] -= vr_projectilespawn_z_offset.value; // quakec assumes 16 offset
+		if (known)
+		{
+			VectorCopy (ent->v.origin, restoreOrigin);
+			VectorCopy (ent->v.absmin, restoreAbsmin);
+			VectorCopy (ent->v.absmax, restoreAbsmax);
+
+			VectorCopy (adj, ent->v.origin);
+
+			// The shotgun/SSG trace origin derives its z from absmin_z +
+			// size_z*0.7 (FireBullets), which the engine keeps anchored to
+			// the true origin — shift the hull bounds by the same delta so
+			// the pellets leave the muzzle too. Restored below.
+			if (weapon == IT_SHOTGUN || weapon == IT_SUPER_SHOTGUN)
+			{
+				vec3_t delta;
+				VectorSubtract (ent->v.origin, restoreOrigin, delta);
+				VectorAdd (ent->v.absmin, delta, ent->v.absmin);
+				VectorAdd (ent->v.absmax, delta, ent->v.absmax);
+			}
+
+			swapped = true;
+
+			// Debug: confirm the muzzle and the spawn origin agree.
+			if (vr_debug_pose.value)
+			{
+				static double last_muzzle_debug = 0;
+				double now = Sys_DoubleTime ();
+				if (now - last_muzzle_debug >= 1.0)
+				{
+					last_muzzle_debug = now;
+					Con_Printf ("[VR DEBUG] muzzle=(%.1f %.1f %.1f) swaporg=(%.1f %.1f %.1f) weapon=%d\n",
+						cl.muzzlepos[0], cl.muzzlepos[1], cl.muzzlepos[2],
+						ent->v.origin[0], ent->v.origin[1], ent->v.origin[2], weapon);
+				}
+			}
+		}
 	}
 
 	pr_global_struct->self = EDICT_TO_PROG(ent);
 	PR_ExecuteProgram (pr_global_struct->PlayerPostThink);
 
-	if (vr_enabled.value)
+	if (swapped)
 	{
-		VectorCopy(restoreOrigin, ent->v.origin);
+		VectorCopy (restoreOrigin, ent->v.origin);
+		VectorCopy (restoreAbsmin, ent->v.absmin);
+		VectorCopy (restoreAbsmax, ent->v.absmax);
 	}
 
 	forceunderwater = !wasunderwater && ent->v.waterlevel >= 3;

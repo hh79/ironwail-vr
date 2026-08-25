@@ -1226,6 +1226,16 @@ void _Host_Frame (double time)
 // allow mice or other external controllers to add commands
 	IN_Commands ();
 
+	// Poll the tracked controllers for button/axis key events. IN_Commands
+	// itself is invoked twice per frame (once from Sys_SendKeyEvents, once
+	// here) and the controller state only updates once per frame, so calling
+	// VR_UpdateInput from inside it would re-fire every edge and double every
+	// key event (menu cursor moves by 2, the menu button opens+closes).
+	// Polling it here, once per frame, keeps the menus navigable with the
+	// controllers even before a game is connected (VR_Move only runs when
+	// cls.signon == SIGNONS).
+	VR_UpdateInput ();
+
 //check the stdin for commands (dedicated servers)
 	Host_GetConsoleCommands ();
 

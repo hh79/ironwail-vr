@@ -42,6 +42,7 @@ void VR_UpdateScreenContent();
 void VR_ShowCrosshair();
 void VR_Draw2D();
 void VR_Move(usercmd_t *cmd);
+void VR_UpdateInput(void);
 void VR_CheckSignon();
 void VR_InitGame();
 qboolean VR_BuildProjectionMatrix(float *matrix, float znear, float zfar); // Build asymmetric per-eye projection in ironwail matrix convention
@@ -64,7 +65,7 @@ extern cvar_t vr_gunmodelscale;
 extern cvar_t vr_gunmodely;
 extern cvar_t vr_crosshairy;
 extern cvar_t vr_floor_offset;
-extern cvar_t vr_projectilespawn_z_offset;
+extern cvar_t vr_muzzle_distance;
 extern cvar_t vr_hud_scale;
 extern cvar_t vr_menu_scale;
 extern cvar_t vr_debug_pose;

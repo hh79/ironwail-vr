@@ -1612,7 +1612,7 @@ void Sbar_Draw (void)
 	float x, y, w, h; //johnfitz
 	qpic_t *pic;
 
-	if (scr_con_current == vid.height)
+	if (scr_con_current == glheight)
 		return;		// console is full screen
 
 	if (cl.qcvm.extfuncs.CSQC_DrawHud && !qcvm)
