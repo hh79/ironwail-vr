@@ -192,7 +192,19 @@ static float vrYaw;
 static bool readbackYaw;
 
 vec3_t vr_viewOffset;
-vec3_t lastMenuPosition{ 0.0, 0.0, 0.0 };
+vec3_t lastHudPosition{ 0.0, 0.0, 0.0 };
+
+// World-static anchor for the main-menu billboard (VR_Draw2D). When the menu
+// opens, the player position + view basis are frozen so the menu becomes a
+// fixed panel in the game world: turning the head or moving the controllers
+// no longer drags it along (it stays where it was when opened). The HUD/sbar
+// keep their own eye-locked billboard. Only meaningful once a world is loaded;
+// the con_forcedup boot menu falls back to the eye-anchored billboard.
+static vec3_t vr_menu_anchor{ 0.0, 0.0, 0.0 };
+static vec3_t vr_menu_forward{ 0.0, 1.0, 0.0 };
+static vec3_t vr_menu_right;
+static vec3_t vr_menu_up;
+static bool vr_menu_captured = false;
 
 vr::IVRSystem *ovrHMD;
 vr::TrackedDevicePose_t ovr_DevicePose[vr::k_unMaxTrackedDeviceCount];
@@ -1838,7 +1850,7 @@ float vr_gui_matrix[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
 void VR_Draw2D()
 {
     qboolean draw_sbar = false;
-    vec3_t menu_angles, forward, right, up, target;
+    vec3_t menu_angles, forward, right, up;
     float scale_hud = vr_menu_scale.value;
 
     int oldglwidth = glwidth,
@@ -1876,7 +1888,14 @@ void VR_Draw2D()
     glDisable(GL_DEPTH_TEST); // prevents drawing sprites on sprites from interferring with one another
     glEnable(GL_BLEND);
 
-    // TODO: Make the menus' position sperate from the right hand. Centered on last view dir?
+    // The main menu is a world-static panel: once it opens it is anchored at a
+    // frozen point in the game world and a frozen facing, so turning the head
+    // or moving the controllers no longer drags it around (the reference
+    // quakespasm-openvr eases its single menu billboard at 0.2 - still
+    // head-locked; this goes the full way and freezes it in world space).
+    // The HUD/sbar keep a separate eye-locked billboard (pass B below).
+    // con_forcedup frames (boot menu, loading) have no meaningful world, so
+    // the menu falls back to the eye-anchored billboard there.
     VectorCopy(cl.viewangles, menu_angles);
 
     if (vr_aimmode.value == VR_AIMMODE_HEAD_MYAW || vr_aimmode.value == VR_AIMMODE_HEAD_MYAW_MPITCH)
@@ -1884,10 +1903,30 @@ void VR_Draw2D()
 
     AngleVectors(menu_angles, forward, right, up);
 
-    // The billboard is anchored to the eye. In-game r_refdef.vieworg is the
-    // per-eye view origin (V_CalcRefdef runs every frame); during menu/loading
-    // frames we must NOT run V_CalcRefdef (it corrupts the first in-game scene
-    // render), so derive the same view origin directly here.
+    qboolean menu_static = !con_forcedup
+        && cl_entities != NULL
+        && key_dest == key_menu;
+    if (!menu_static)
+    {
+        // Menu closed (or no world yet): drop the frozen anchor so the next
+        // open recaptures it at the new position.
+        vr_menu_captured = false;
+    }
+    else if (!vr_menu_captured)
+    {
+        // Freeze the player position (feet + eye height, no head offset, no
+        // bob) and the view basis right now; from here on the menu matrix
+        // never re-reads them.
+        VectorCopy(cl_entities[cl.viewentity].origin, vr_menu_anchor);
+        vr_menu_anchor[2] += cl.viewheight;
+        AngleVectors(menu_angles, vr_menu_forward, vr_menu_right, vr_menu_up);
+        vr_menu_captured = true;
+    }
+
+    // Eye origin of the current frame: the in-game vieworg (V_CalcRefdef ran
+    // this frame, vr_viewOffset included); during menu/loading frames it must
+    // NOT come from V_CalcRefdef (it corrupts the first in-game scene render),
+    // so derive the same view origin directly here.
     vec3_t billboard_vieworg;
     if (con_forcedup)
     {
@@ -1905,31 +1944,120 @@ void VR_Draw2D()
     else
         VectorCopy(r_refdef.vieworg, billboard_vieworg);
 
-    VectorMA(billboard_vieworg, 48, forward, target);
-
-    // The HUD/status bar is drawn through this same billboard. It must be
-    // locked to the eye: any lag here (quakespasm-openvr eases only the menu,
-    // at 0.2, and pins the sbar at 1.0) makes the HUD drift relative to the
-    // player whenever vieworg moves (room-scale movement), which is perceived
-    // as the HUD sliding toward/away from the player. Track target exactly.
-    vec3_t smoothedTarget;
-    vec3lerp(smoothedTarget, lastMenuPosition, target, 1.0);
-    VectorCopy(smoothedTarget, lastMenuPosition);
-
-    // Build the 2D billboard matrix: NDC quad -> 3D billboard in front of the
-    // eye, rendered through the per-eye view-projection. The GUI shader applies
-    // this so the overlay converges correctly in stereo (matches quakespasm-openvr's
-    // 3D-placed 2D). The billboard aspect must match the GUI aspect (guiwidth:
-    // guiheight) or the content is squashed - the canvas maps the whole gui
-    // screen to the NDC quad.
+    // Per-eye view-projection shared by both billboards. Build it once: the
+    // menu plane and the HUD plane only differ in their model matrix
+    // (anchor/basis), never in the eye's view.
+    float eye_viewproj[16];
+    if (con_forcedup)
     {
+        // Menu/loading: build the per-eye view-projection locally so we
+        // never mutate the engine's render state (r_matproj/r_matview/
+        // r_matviewproj/r_framedata/frustum) that R_SetFrustum normally
+        // owns - doing that during con_forcedup frames garbles the first
+        // in-game scene render (see view.c V_RenderView).
+        float w, h, d, znear, zfar;
+        float proj[16], view[16], rotation[16], translation[16];
+
+        w = 1.f / tanf(r_refdef.fov_x * 0.5f * M_PI_DIV_180);
+        h = 1.f / tanf(r_refdef.fov_y * 0.5f * M_PI_DIV_180);
+        d = 12.f * q_min(w, h);
+        znear = CLAMP(0.5f, d, 4.f);
+        zfar = gl_farclip.value;
+
+        if (VR_BuildProjectionMatrix(proj, znear, zfar))
+        {
+            IdentityMatrix(view);
+            RotationMatrix(rotation, -menu_angles[ROLL] * M_PI_DIV_180, 0);
+            MatrixMultiply(view, rotation);
+            RotationMatrix(rotation, -menu_angles[PITCH] * M_PI_DIV_180, 1);
+            MatrixMultiply(view, rotation);
+            RotationMatrix(rotation, -menu_angles[YAW] * M_PI_DIV_180, 2);
+            MatrixMultiply(view, rotation);
+            TranslationMatrix(translation,
+                -billboard_vieworg[0], -billboard_vieworg[1], -billboard_vieworg[2]);
+            MatrixMultiply(view, translation);
+
+            memcpy(eye_viewproj, proj, sizeof(eye_viewproj));
+            MatrixMultiply(eye_viewproj, view);
+        }
+        else
+        {
+            // Should not happen (current_eye is set in this path)
+            extern float r_matviewproj[16];
+            memcpy(eye_viewproj, r_matviewproj, sizeof(eye_viewproj));
+        }
+    }
+    else
+    {
+        // In-game: the current eye's matrix, set per eye by R_SetFrustum.
         extern float r_matviewproj[16];
+        memcpy(eye_viewproj, r_matviewproj, sizeof(eye_viewproj));
+    }
+
+    // Pass A: the menu billboard. World-static when the menu is open in a
+    // loaded world, otherwise eye-anchored (con_forcedup / boot menu). Only
+    // built when menu content is actually present - the flush is a no-op
+    // otherwise, and skipping the whole pass keeps the in-game frame to a
+    // single HUD billboard (no wasted matrix work per eye).
+    if (key_dest == key_menu || (scr_drawdialog && con_forcedup))
+    {
+        vec3_t menu_target;
+        if (menu_static)
+            VectorMA(vr_menu_anchor, 48, vr_menu_forward, menu_target);
+        else
+            VectorMA(billboard_vieworg, 48, forward, menu_target);
+
         float W = 320.f * scale_hud;
         float H = W * (float)vid.guiheight / (float)q_max (vid.guiwidth, 1);
+        vec3_t b_right, b_up;
+        VectorCopy(menu_static ? vr_menu_right : right, b_right);
+        VectorCopy(menu_static ? vr_menu_up : up, b_up);
         float model[16];
         memset(model, 0, sizeof(model));
         // canvas: gui x=0 (left) -> NDC -1, gui y=0 (top) -> NDC +1
         // column-major: model[col*4+row]
+        model[0*4+0] =  b_right[0] * W * 0.5f;   // col0 = x coeff along right
+        model[0*4+1] =  b_right[1] * W * 0.5f;
+        model[0*4+2] =  b_right[2] * W * 0.5f;
+        model[1*4+0] =  b_up[0] * H * 0.5f;      // col1 = y coeff along up
+        model[1*4+1] =  b_up[1] * H * 0.5f;
+        model[1*4+2] =  b_up[2] * H * 0.5f;
+        model[3*4+0] =  menu_target[0];          // col3 = translation
+        model[3*4+1] =  menu_target[1];
+        model[3*4+2] =  menu_target[2];
+        model[3*4+3] =  1.f;
+
+        float viewproj[16];
+        memcpy(viewproj, eye_viewproj, sizeof(viewproj));
+        MatrixMultiply (viewproj, model);
+        memcpy (vr_gui_matrix, viewproj, sizeof (viewproj));
+        vr_gui_matrix_valid = true;
+
+        // Menu-phase content: the main menu + the boot menu background.
+        if (scr_drawdialog && con_forcedup)
+        {
+            Draw_ConsoleBackground();
+        }
+        M_Draw();
+        Draw_Flush();
+    }
+
+    // Pass B: the HUD/status bar billboard, locked to the eye. It must track
+    // the eye exactly: any lag (the reference pins the sbar at 1.0) makes the
+    // HUD drift relative to the player whenever vieworg moves (room-scale
+    // movement), which is perceived as the HUD sliding toward/away from the
+    // player.
+    {
+        vec3_t hud_target;
+        VectorMA(billboard_vieworg, 48, forward, hud_target);
+        vec3_t smoothedTarget;
+        vec3lerp(smoothedTarget, lastHudPosition, hud_target, 1.0);
+        VectorCopy(smoothedTarget, lastHudPosition);
+
+        float W = 320.f * scale_hud;
+        float H = W * (float)vid.guiheight / (float)q_max (vid.guiwidth, 1);
+        float model[16];
+        memset(model, 0, sizeof(model));
         model[0*4+0] =  right[0] * W * 0.5f;   // col0 = x coeff along right
         model[0*4+1] =  right[1] * W * 0.5f;
         model[0*4+2] =  right[2] * W * 0.5f;
@@ -1940,102 +2068,49 @@ void VR_Draw2D()
         model[3*4+1] =  smoothedTarget[1];
         model[3*4+2] =  smoothedTarget[2];
         model[3*4+3] =  1.f;
-        // viewproj = ViewProj * Model (MatrixMultiply is in-place: left = left*right)
-        {
-            float viewproj[16];
 
-            if (con_forcedup)
-            {
-                // Menu/loading: build the per-eye view-projection locally so we
-                // never mutate the engine's render state (r_matproj/r_matview/
-                // r_matviewproj/r_framedata/frustum) that R_SetFrustum normally
-                // owns - doing that during con_forcedup frames garbles the first
-                // in-game scene render (see view.c V_RenderView).
-                float w, h, d, znear, zfar;
-                float proj[16], view[16], rotation[16], translation[16];
-
-                w = 1.f / tanf(r_refdef.fov_x * 0.5f * M_PI_DIV_180);
-                h = 1.f / tanf(r_refdef.fov_y * 0.5f * M_PI_DIV_180);
-                d = 12.f * q_min(w, h);
-                znear = CLAMP(0.5f, d, 4.f);
-                zfar = gl_farclip.value;
-
-                if (VR_BuildProjectionMatrix(proj, znear, zfar))
-                {
-                    IdentityMatrix(view);
-                    RotationMatrix(rotation, -menu_angles[ROLL] * M_PI_DIV_180, 0);
-                    MatrixMultiply(view, rotation);
-                    RotationMatrix(rotation, -menu_angles[PITCH] * M_PI_DIV_180, 1);
-                    MatrixMultiply(view, rotation);
-                    RotationMatrix(rotation, -menu_angles[YAW] * M_PI_DIV_180, 2);
-                    MatrixMultiply(view, rotation);
-                    TranslationMatrix(translation,
-                        -billboard_vieworg[0], -billboard_vieworg[1], -billboard_vieworg[2]);
-                    MatrixMultiply(view, translation);
-
-                    memcpy(viewproj, proj, sizeof(viewproj));
-                    MatrixMultiply(viewproj, view);
-                }
-                else
-                {
-                    // Should not happen (current_eye is set in this path)
-                    extern float r_matviewproj[16];
-                    memcpy(viewproj, r_matviewproj, sizeof(viewproj));
-                }
-            }
-            else
-            {
-                // In-game: the current eye's matrix, set per eye by R_SetFrustum.
-                extern float r_matviewproj[16];
-                memcpy(viewproj, r_matviewproj, sizeof(viewproj));
-            }
-
-            MatrixMultiply (viewproj, model);
-            memcpy (vr_gui_matrix, viewproj, sizeof (viewproj));
-        }
+        float viewproj[16];
+        memcpy(viewproj, eye_viewproj, sizeof(viewproj));
+        MatrixMultiply (viewproj, model);
+        memcpy (vr_gui_matrix, viewproj, sizeof (viewproj));
         vr_gui_matrix_valid = true;
-    }
 
-    if(scr_drawdialog) // new game confirm
-    {
-        if(con_forcedup)
+        if (scr_drawdialog) // new game confirm
         {
-            Draw_ConsoleBackground();
+            if (!con_forcedup)
+            {
+                draw_sbar = true; // Sbar_Draw ();
+            }
+            Draw_FadeScreen(1.0f);
+            SCR_DrawNotifyString();
+        }
+        else if (scr_drawloading) //loading
+        {
+            SCR_DrawLoading();
+            draw_sbar = true; //Sbar_Draw ();
+        }
+        else if (cl.intermission == 1 && key_dest == key_game) //end of level
+        {
+            Sbar_IntermissionOverlay();
+        }
+        else if (cl.intermission == 2 && key_dest == key_game) //end of episode
+        {
+            Sbar_FinaleOverlay();
+            SCR_CheckDrawCenterString();
         }
         else
         {
-            draw_sbar = true; // Sbar_Draw ();
+            //SCR_DrawCrosshair (); //johnfitz
+            SCR_DrawNet();
+            SCR_DrawTurtle();
+            SCR_DrawPause();
+            SCR_CheckDrawCenterString();
+            draw_sbar = true; //Sbar_Draw ();
+            SCR_DrawDevStats(); //johnfitz
+            SCR_DrawFPS(); //johnfitz
+            SCR_DrawClock(); //johnfitz
+            SCR_DrawConsole();
         }
-        Draw_FadeScreen(1.0f);
-        SCR_DrawNotifyString();
-    }
-    else if (scr_drawloading) //loading
-    {
-        SCR_DrawLoading();
-        draw_sbar = true; //Sbar_Draw ();
-    }
-    else if (cl.intermission == 1 && key_dest == key_game) //end of level
-    {
-        Sbar_IntermissionOverlay();
-    }
-    else if (cl.intermission == 2 && key_dest == key_game) //end of episode
-    {
-        Sbar_FinaleOverlay();
-        SCR_CheckDrawCenterString();
-    }
-    else
-    {
-        //SCR_DrawCrosshair (); //johnfitz
-        SCR_DrawNet();
-        SCR_DrawTurtle();
-        SCR_DrawPause();
-        SCR_CheckDrawCenterString();
-        draw_sbar = true; //Sbar_Draw ();
-        SCR_DrawDevStats(); //johnfitz
-        SCR_DrawFPS(); //johnfitz
-        SCR_DrawClock(); //johnfitz
-        SCR_DrawConsole();
-        M_Draw();
     }
 
     if(draw_sbar)

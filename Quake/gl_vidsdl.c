@@ -259,11 +259,26 @@ The actual pixel size of the GL backbuffer. On most setups this equals
 vid.width/vid.height, but a resized or DPI-scaled window can make the
 drawable wider than the logical size, and the VR mirror must cover the
 full drawable or the uncovered strip keeps stale backbuffer content.
+
+SDL_GL_GetDrawableSize performs an X11 round-trip, and the VR mirror
+path calls this twice per frame (blit + overlay), so cache the result
+per frame.
 ================= */
 void VID_GetDrawableSize (int *w, int *h)
 {
+	static int cw = 0, ch = 0;
+	static double ctime = -1;
+
 	if (draw_context)
-		SDL_GL_GetDrawableSize (draw_context, w, h);
+	{
+		if (ctime != realtime)
+		{
+			ctime = realtime;
+			SDL_GL_GetDrawableSize (draw_context, &cw, &ch);
+		}
+		*w = cw;
+		*h = ch;
+	}
 	else
 	{
 		*w = vid.width;
@@ -1406,7 +1421,13 @@ GL_EndRendering
 */
 void GL_EndRendering (void)
 {
-	GL_PostProcess ();
+	// In VR the per-eye gamma/postprocess already ran inside the eye render
+	// (GLSLGamma_GammaCorrect -> GL_PostProcess with vr_submit_fbo set);
+	// running the desktop pass again here would waste a full-screen pass per
+	// frame and overwrite the mirror with the (stale) desktop composite.
+	extern cvar_t vr_enabled;
+	if (!vr_enabled.value)
+		GL_PostProcess ();
 	GL_ReleaseFrameResources ();
 
 	if (!scr_skipupdate)
